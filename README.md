@@ -56,17 +56,48 @@ If VRAM runs out, lower `--n-gpu-layers`; try `15`, `10`, `5`, or `0`.
 
 v1 scored **66.52%** accuracy on the public-test leaderboard. v2 adds a prompt
 hint that explicitly asks the model to consider every choice on questions with
-more than four options, plus an optional two-step chain-of-thought path. v2
-measured accuracy is **TBD**.
+more than four options, plus an optional two-step chain-of-thought path. The
+CoT evaluation was abandoned because it was approximately **17x slower** than
+v1.
 
 Enable CoT with `--cot`, or set `model.use_cot: true` in `config.yaml`. Use
 `--no-cot` to override an enabled config value. `model.cot_max_tokens` controls
-the reasoning budget and defaults to `200`. Because CoT performs a reasoning
-generation followed by constrained letter extraction, expect roughly 3-4x the
-v1 time per question.
+the reasoning budget and defaults to `200`. Because the measured implementation
+was approximately 17x slower than v1, it is retained only for comparison and is
+not the recommended evaluation path.
 
 Run the full public-test CoT evaluation with:
 
 ```bash
 bash scripts/eval_full_cot.sh
 ```
+
+## v3 — RAG (viwiki)
+
+v3 retrieves the top three relevant chunks from a Vietnamese Wikipedia FAISS
+index using BGE-m3 dense embeddings, then prepends them to the LLM prompt.
+Questions that already contain `Đoạn thông tin:` skip retrieval because their
+reading-comprehension passage is already provided.
+
+Install the data/RAG dependencies and build the index once:
+
+```bash
+bash scripts/build_viwiki_index.sh
+```
+
+The CPU build is expected to take 1-2 hours and is faster on GPU when the
+wrapper or `src.rag.build_index` command is adjusted to use `--device cuda`.
+`FlagEmbedding` and `faiss-cpu` from `requirements-data.txt` are also required
+at runtime whenever RAG is enabled.
+
+Run the full public test with RAG:
+
+```bash
+bash scripts/eval_full_rag.sh
+```
+
+Expected evaluation time is about 25-30 minutes for 463 questions. Configure
+RAG with `rag.enabled`, `rag.top_k`, and `rag.device` in `config.yaml`, or use
+the corresponding CLI flags.
+
+Baselines: **v1 = 66.52%**, **v2 = abandoned (17x slow)**, **v3 = TBD**.

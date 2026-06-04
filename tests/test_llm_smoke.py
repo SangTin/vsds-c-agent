@@ -68,6 +68,22 @@ def test_prompt_contains_question_and_letter_prefixed_choices() -> None:
     assert "B. Lựa chọn hai" in prompt
 
 
+def test_prompt_prepends_retrieved_context_and_truncates_chunk_text() -> None:
+    answerer, llm, _ = build_answerer("A")
+    retrieved = [{"title": "Việt Nam", "text": "x" * 1300}]
+
+    answerer.answer_mcq("Question", ["one", "two"], retrieved=retrieved)
+
+    prompt = llm.create_chat_completion.call_args.kwargs["messages"][1]["content"]
+    assert prompt.startswith(
+        "Ngữ cảnh liên quan từ Wikipedia tiếng Việt "
+        "(sắp xếp theo độ liên quan):\n[1] Việt Nam: "
+    )
+    assert "x" * 1200 in prompt
+    assert "x" * 1201 not in prompt
+    assert prompt.index("[1] Việt Nam:") < prompt.index("Câu hỏi:\nQuestion")
+
+
 def test_four_choice_prompt_does_not_contain_many_choice_hint() -> None:
     answerer, llm, _ = build_answerer("B")
 
@@ -152,7 +168,12 @@ def test_answer_dispatches_by_use_cot(use_cot: bool, expected_method: str) -> No
     assert answer == ("B" if use_cot else "A")
     expected = cot if expected_method == "answer_mcq_cot" else fast
     unexpected = fast if expected_method == "answer_mcq_cot" else cot
-    expected.assert_called_once_with("Question", ["one", "two"], None)
+    expected.assert_called_once_with(
+        "Question",
+        ["one", "two"],
+        None,
+        retrieved=None,
+    )
     unexpected.assert_not_called()
 
 

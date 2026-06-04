@@ -6,6 +6,7 @@ venv/
 
 models/
 *.gguf
+data_kb/
 
 output/
 pred.csv

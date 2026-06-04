@@ -1,5 +1,9 @@
-# Data prep only — NOT installed in the runtime Docker image.
-# Install on WSL host to build the RAG corpus once, then mount the
-# resulting JSONL/FAISS index into the container.
+# Data prep and optional RAG runtime dependencies.
+# Install on WSL host to build the corpus/index, then ensure FlagEmbedding
+# and FAISS are present in any runtime where RAG is enabled.
 datasets>=2.18
 tqdm>=4.66
+
+# These two are also needed at runtime when RAG is enabled.
+FlagEmbedding>=1.2
+faiss-cpu>=1.8

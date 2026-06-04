@@ -9,8 +9,13 @@ model:
 
 # Reserved for Milestone 3 routing settings.
 router:
-# Reserved for Milestone 4 retrieval settings.
 rag:
+  enabled: false
+  index_path: data_kb/viwiki/index.faiss
+  metadata_path: data_kb/viwiki/metadata.jsonl
+  top_k: 3
+  device: cpu
+  model_name: BAAI/bge-m3
 
 output:
   fallback_answer: "A"

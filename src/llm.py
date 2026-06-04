@@ -57,15 +57,31 @@ class LLMAnswerer:
             "Hãy xem xét kỹ TẤT CẢ lựa chọn trước khi chọn."
         )
 
+    @staticmethod
+    def _retrieved_context(retrieved: list[dict[str, Any]] | None) -> str:
+        if not retrieved:
+            return ""
+        lines = [
+            "Ngữ cảnh liên quan từ Wikipedia tiếng Việt "
+            "(sắp xếp theo độ liên quan):"
+        ]
+        for index, record in enumerate(retrieved, start=1):
+            title = str(record.get("title", ""))
+            text = str(record.get("text", ""))[:1200]
+            lines.append(f"[{index}] {title}: {text}")
+        return "\n".join(lines) + "\n\n"
+
     def _user_prompt(
         self,
         question: str,
         choices: list[str],
         context: str | None,
         closing_instruction: str,
+        retrieved: list[dict[str, Any]] | None = None,
     ) -> str:
         context_section = f"\n\nNgữ cảnh:\n{context}" if context else ""
         return (
+            f"{self._retrieved_context(retrieved)}"
             f"Câu hỏi:\n{question}{context_section}\n\n"
             f"Lựa chọn:\n{self._choice_lines(choices)}"
             f"{self._many_choice_hint(choices)}\n\n"
@@ -77,6 +93,7 @@ class LLMAnswerer:
         question: str,
         choices: list[str],
         context: str | None = None,
+        retrieved: list[dict[str, Any]] | None = None,
     ) -> str:
         messages = [
             {
@@ -93,6 +110,7 @@ class LLMAnswerer:
                     choices,
                     context,
                     "Trả lời bằng đúng 1 chữ cái.",
+                    retrieved=retrieved,
                 ),
             },
         ]
@@ -117,6 +135,7 @@ class LLMAnswerer:
         question: str,
         choices: list[str],
         context: str | None = None,
+        retrieved: list[dict[str, Any]] | None = None,
     ) -> str:
         reasoning_messages = [
             {
@@ -134,6 +153,7 @@ class LLMAnswerer:
                     context,
                     "Hãy suy luận ngắn gọn từng bước rồi kết luận đáp án bằng cú pháp "
                     "'Đáp án cuối: <letter>'.",
+                    retrieved=retrieved,
                 ),
             },
         ]
@@ -146,7 +166,6 @@ class LLMAnswerer:
         reasoning_content = reasoning_completion["choices"][0]["message"]["content"]
         reasoning = reasoning_content if isinstance(reasoning_content, str) else ""
 
-        context_section = f"\n\nNgữ cảnh:\n{context}" if context else ""
         extraction_messages = [
             {
                 "role": "system",
@@ -159,10 +178,13 @@ class LLMAnswerer:
                 "role": "user",
                 "content": (
                     f"Suy luận:\n{reasoning}\n\n"
-                    f"Câu hỏi:\n{question}{context_section}\n\n"
-                    f"Các lựa chọn:\n{self._choice_lines(choices)}"
-                    f"{self._many_choice_hint(choices)}\n\n"
-                    "Dựa trên suy luận trên, trả lời bằng đúng 1 chữ cái."
+                    + self._user_prompt(
+                        question,
+                        choices,
+                        context,
+                        "Dựa trên suy luận trên, trả lời bằng đúng 1 chữ cái.",
+                        retrieved=retrieved,
+                    )
                 ),
             },
         ]
@@ -187,7 +209,18 @@ class LLMAnswerer:
         question: str,
         choices: list[str],
         context: str | None = None,
+        retrieved: list[dict[str, Any]] | None = None,
     ) -> str:
         if self.use_cot:
-            return self.answer_mcq_cot(question, choices, context)
-        return self.answer_mcq(question, choices, context)
+            return self.answer_mcq_cot(
+                question,
+                choices,
+                context,
+                retrieved=retrieved,
+            )
+        return self.answer_mcq(
+            question,
+            choices,
+            context,
+            retrieved=retrieved,
+        )

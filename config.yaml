@@ -1,5 +1,10 @@
-# Reserved for Milestone 2 model settings.
 model:
+  # Split GGUF: point at the FIRST shard; llama.cpp loads the rest by suffix convention.
+  path: models/qwen2.5-7b/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf
+  n_gpu_layers: 20
+  n_ctx: 8192
+  seed: 42
+
 # Reserved for Milestone 3 routing settings.
 router:
 # Reserved for Milestone 4 retrieval settings.

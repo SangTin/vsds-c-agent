@@ -1,2 +1,6 @@
-# LLM dependencies will be added in Milestone 2.
 pytest>=8.0
+
+# llama-cpp-python is installed separately on WSL with the matching CUDA wheel.
+# It is not pinned here because the wheel URL is platform-specific; see README
+# section "Smoke test M2".
+# llama-cpp-python

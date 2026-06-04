@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -72,8 +73,14 @@ def main() -> int:
                 written += 1
 
     print(f"wrote {written} chunks to {args.out}", file=sys.stderr)
+    sys.stdout.flush()
+    sys.stderr.flush()
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    rc = main()
+    # `datasets` streaming leaks an aiohttp loop; the resulting
+    # PyGILState_Release crash during interpreter finalization makes nohup
+    # mark the run as failed even when our output is intact. Bypass cleanup.
+    os._exit(rc)

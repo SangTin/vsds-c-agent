@@ -90,6 +90,20 @@ def _count_lines(path: Path) -> int:
     return n
 
 
+def _truncate_jsonl(path: Path, keep: int) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    kept = 0
+    with path.open("r", encoding="utf-8") as src, tmp.open("w", encoding="utf-8") as dst:
+        for line in src:
+            if not line.strip():
+                continue
+            if kept >= keep:
+                break
+            dst.write(line)
+            kept += 1
+    tmp.replace(path)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.batch_size < 1:
@@ -106,10 +120,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         index = faiss.read_index(str(args.index_out))
         resume_offset = index.ntotal
         meta_lines = _count_lines(args.metadata_out)
-        if meta_lines != resume_offset:
+        if meta_lines > resume_offset:
+            # Metadata flushes every buffer (2k chunks); index only at checkpoint.
+            # A mid-checkpoint disconnect leaves extra metadata lines whose vectors
+            # were lost from in-memory. Truncate metadata to match the saved index;
+            # those chunks will be re-embedded.
+            print(
+                f"Metadata has {meta_lines:,} lines but index has {resume_offset:,} "
+                f"vectors. Truncating metadata to match (lost "
+                f"{meta_lines - resume_offset:,} unsaved chunks; will re-embed).",
+                file=sys.stderr,
+                flush=True,
+            )
+            _truncate_jsonl(args.metadata_out, resume_offset)
+        elif meta_lines < resume_offset:
             raise ValueError(
-                f"Checkpoint inconsistent: index has {resume_offset} vectors but "
-                f"metadata has {meta_lines} lines. Delete one of them and retry."
+                f"Index has {resume_offset} vectors but metadata only "
+                f"{meta_lines} lines. Index is ahead of metadata — delete both "
+                f"and rebuild from scratch."
             )
         metadata_mode = "a"
         print(

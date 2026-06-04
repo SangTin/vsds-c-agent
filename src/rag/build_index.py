@@ -41,6 +41,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--max-length", type=int, default=512)
     return parser.parse_args(argv)
 
 
@@ -76,7 +77,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.index_out.parent.mkdir(parents=True, exist_ok=True)
     args.metadata_out.parent.mkdir(parents=True, exist_ok=True)
 
-    embedder = BGEEmbedder(device=args.device)
+    embedder = BGEEmbedder(device=args.device, max_length=args.max_length)
     index = faiss.IndexFlatIP(DIMENSION)
     texts: list[str] = []
     records: list[dict[str, Any]] = []

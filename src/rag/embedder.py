@@ -12,6 +12,7 @@ class BGEEmbedder:
         self,
         model_name: str = "BAAI/bge-m3",
         device: str = "cpu",
+        max_length: int = 512,
         verbose: bool = False,
     ) -> None:
         # Keep FlagEmbedding optional for direct-LLM and stub runs.
@@ -23,6 +24,9 @@ class BGEEmbedder:
             normalize_embeddings=False,
             use_fp16=device != "cpu",
         )
+        # Default BGE-m3 max_length is 8192; corpus chunks are ~600 tokens so
+        # padding to 8192 wastes ~14x compute. 512 is enough for our chunks.
+        self.max_length = max_length
         self.verbose = verbose
 
     @staticmethod
@@ -36,6 +40,7 @@ class BGEEmbedder:
     def encode_query(self, text: str) -> np.ndarray:
         result = self.model.encode(
             [text],
+            max_length=self.max_length,
             return_dense=True,
             return_sparse=False,
             return_colbert_vecs=False,
@@ -58,6 +63,7 @@ class BGEEmbedder:
         result = self.model.encode(
             texts,
             batch_size=batch_size,
+            max_length=self.max_length,
             return_dense=True,
             return_sparse=False,
             return_colbert_vecs=False,

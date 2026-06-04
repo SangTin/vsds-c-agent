@@ -20,7 +20,7 @@ class BGEEmbedder:
 
         self.model: Any = BGEM3FlagModel(
             model_name,
-            devices=device,
+            device=device,
             normalize_embeddings=False,
             use_fp16=device != "cpu",
         )

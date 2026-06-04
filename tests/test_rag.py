@@ -27,7 +27,7 @@ def test_bge_embedder_encode_query_returns_normalized_float32_vector() -> None:
 
     flag_embedding.BGEM3FlagModel.assert_called_once_with(  # type: ignore[attr-defined]
         "BAAI/bge-m3",
-        devices="cpu",
+        device="cpu",
         normalize_embeddings=False,
         use_fp16=False,
     )

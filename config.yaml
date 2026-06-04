@@ -1,0 +1,9 @@
+# Reserved for Milestone 2 model settings.
+model:
+# Reserved for Milestone 3 routing settings.
+router:
+# Reserved for Milestone 4 retrieval settings.
+rag:
+
+output:
+  fallback_answer: "A"

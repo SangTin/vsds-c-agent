@@ -36,6 +36,7 @@ def test_bge_embedder_encode_query_returns_normalized_float32_vector() -> None:
     assert np.isclose(np.linalg.norm(vector), 1.0)
     model.encode.assert_called_once_with(
         ["Việt Nam"],
+        max_length=512,
         return_dense=True,
         return_sparse=False,
         return_colbert_vecs=False,

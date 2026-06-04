@@ -3,6 +3,10 @@
 Vectors are added directly to IndexFlatIP in 2,000-record buffers. This keeps
 the 6 GB JSONL corpus and the full embedding matrix out of Python heap memory;
 FAISS owns the final fp32 matrix as buffers are added.
+
+Periodic checkpointing (--checkpoint-interval) writes the in-progress index and
+metadata to the same output paths so a disconnected Colab session can be
+resumed with --resume.
 """
 
 from __future__ import annotations
@@ -42,6 +46,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--max-length", type=int, default=512)
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=0,
+        help="Save index+metadata every N processed chunks (0=disabled).",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Load existing --index-out and --metadata-out and skip already-embedded chunks.",
+    )
     return parser.parse_args(argv)
 
 
@@ -66,29 +81,60 @@ def _progress(processed: int, bytes_read: int, total_bytes: int, started: float)
     )
 
 
+def _count_lines(path: Path) -> int:
+    n = 0
+    with path.open("rb") as f:
+        for raw in f:
+            if raw.strip():
+                n += 1
+    return n
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.batch_size < 1:
         raise ValueError("--batch-size must be positive")
 
-    # These heavy dependencies are needed only by the offline index build.
     import faiss
 
     args.index_out.parent.mkdir(parents=True, exist_ok=True)
     args.metadata_out.parent.mkdir(parents=True, exist_ok=True)
 
+    resume_offset = 0
+    metadata_mode = "w"
+    if args.resume and args.index_out.exists() and args.metadata_out.exists():
+        index = faiss.read_index(str(args.index_out))
+        resume_offset = index.ntotal
+        meta_lines = _count_lines(args.metadata_out)
+        if meta_lines != resume_offset:
+            raise ValueError(
+                f"Checkpoint inconsistent: index has {resume_offset} vectors but "
+                f"metadata has {meta_lines} lines. Delete one of them and retry."
+            )
+        metadata_mode = "a"
+        print(
+            f"Resuming from checkpoint at {resume_offset:,} chunks",
+            file=sys.stderr,
+            flush=True,
+        )
+    else:
+        index = faiss.IndexFlatIP(DIMENSION)
+
     embedder = BGEEmbedder(device=args.device, max_length=args.max_length)
-    index = faiss.IndexFlatIP(DIMENSION)
+
     texts: list[str] = []
     records: list[dict[str, Any]] = []
-    processed = 0
+    processed = resume_offset
     bytes_read = 0
-    next_progress = PROGRESS_INTERVAL
+    next_progress = (processed // PROGRESS_INTERVAL + 1) * PROGRESS_INTERVAL
+    next_checkpoint = (
+        processed + args.checkpoint_interval if args.checkpoint_interval > 0 else 0
+    )
     total_bytes = args.chunks.stat().st_size
     started = time.perf_counter()
 
     def flush(metadata_file: TextIO) -> None:
-        nonlocal processed
+        nonlocal processed, next_checkpoint
         if not texts:
             return
         vectors = embedder.encode_corpus(texts, batch_size=args.batch_size)
@@ -97,16 +143,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             metadata_file.write(json.dumps(record, ensure_ascii=False))
             metadata_file.write("\n")
         processed += len(texts)
+        metadata_file.flush()
         texts.clear()
         records.clear()
+        if args.checkpoint_interval > 0 and processed >= next_checkpoint:
+            ckpt_start = time.perf_counter()
+            faiss.write_index(index, str(args.index_out))
+            ckpt_elapsed = time.perf_counter() - ckpt_start
+            print(
+                f"Checkpoint saved at {processed:,} chunks "
+                f"(index.ntotal={index.ntotal:,}, wrote in {ckpt_elapsed:.1f}s)",
+                file=sys.stderr,
+                flush=True,
+            )
+            next_checkpoint = processed + args.checkpoint_interval
 
+    skipped = 0
     with (
         args.chunks.open("rb") as chunks_file,
-        args.metadata_out.open("w", encoding="utf-8") as metadata_file,
+        args.metadata_out.open(metadata_mode, encoding="utf-8") as metadata_file,
     ):
         for raw_line in chunks_file:
             bytes_read += len(raw_line)
             if not raw_line.strip():
+                continue
+            if skipped < resume_offset:
+                skipped += 1
                 continue
             record = json.loads(raw_line)
             texts.append(record["text"])
@@ -120,9 +182,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     faiss.write_index(index, str(args.index_out))
     elapsed = time.perf_counter() - started
+    new_chunks = processed - resume_offset
     print(
         f"Wrote {processed:,} vectors to {args.index_out} and metadata to "
-        f"{args.metadata_out} in {elapsed / 60:.1f} min",
+        f"{args.metadata_out} ({new_chunks:,} new in {elapsed / 60:.1f} min)",
         file=sys.stderr,
     )
     sys.stdout.flush()

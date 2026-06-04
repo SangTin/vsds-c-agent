@@ -1,4 +1,5 @@
 pytest>=8.0
+PyYAML>=6.0
 
 # llama-cpp-python is installed separately on WSL with the matching CUDA wheel.
 # It is not pinned here because the wheel URL is platform-specific; see README

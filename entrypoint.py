@@ -17,6 +17,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "n_gpu_layers": 20,
         "n_ctx": 8192,
         "seed": 42,
+        "use_cot": False,
+        "cot_max_tokens": 200,
     },
     "output": {"fallback_answer": "A"},
 }
@@ -38,6 +40,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--n-ctx", type=int, default=model_config["n_ctx"])
     parser.add_argument("--seed", type=int, default=model_config["seed"])
+    parser.add_argument("--cot", action="store_true", default=None)
+    parser.add_argument("--no-cot", action="store_false", dest="cot")
+    parser.add_argument("--cot-max-tokens", type=int, default=None)
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
 
@@ -68,6 +73,8 @@ def load_config(path: Path) -> dict[str, Any]:
     n_gpu_layers = model.get("n_gpu_layers", model_defaults["n_gpu_layers"])
     n_ctx = model.get("n_ctx", model_defaults["n_ctx"])
     seed = model.get("seed", model_defaults["seed"])
+    use_cot = model.get("use_cot", model_defaults["use_cot"])
+    cot_max_tokens = model.get("cot_max_tokens", model_defaults["cot_max_tokens"])
     fallback = output.get("fallback_answer", output_defaults["fallback_answer"])
     if not isinstance(path, str):
         path = model_defaults["path"]
@@ -77,6 +84,10 @@ def load_config(path: Path) -> dict[str, Any]:
         n_ctx = model_defaults["n_ctx"]
     if not isinstance(seed, int):
         seed = model_defaults["seed"]
+    if not isinstance(use_cot, bool):
+        use_cot = model_defaults["use_cot"]
+    if not isinstance(cot_max_tokens, int):
+        cot_max_tokens = model_defaults["cot_max_tokens"]
     if not isinstance(fallback, str):
         fallback = output_defaults["fallback_answer"]
 
@@ -86,6 +97,8 @@ def load_config(path: Path) -> dict[str, Any]:
             "n_gpu_layers": n_gpu_layers,
             "n_ctx": n_ctx,
             "seed": seed,
+            "use_cot": use_cot,
+            "cot_max_tokens": cot_max_tokens,
         },
         "output": {"fallback_answer": fallback},
     }
@@ -97,6 +110,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = parse_args(argv)
         config = load_config(args.config)
         model_path = args.model_path or Path(config["model"]["path"])
+        use_cot = config["model"]["use_cot"] if args.cot is None else args.cot
+        cot_max_tokens = (
+            config["model"]["cot_max_tokens"]
+            if args.cot_max_tokens is None
+            else args.cot_max_tokens
+        )
         input_path = discover_input(args.data_dir)
         if args.verbose:
             print(f"Input: {input_path}")
@@ -105,6 +124,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"n_gpu_layers: {args.n_gpu_layers}")
             print(f"n_ctx: {args.n_ctx}")
             print(f"seed: {args.seed}")
+            print(f"use_cot: {use_cot}")
+            print(f"cot_max_tokens: {cot_max_tokens}")
 
         questions = load_questions(input_path)
         print(f"Questions read: {len(questions)}")
@@ -118,6 +139,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     n_ctx=args.n_ctx,
                     seed=args.seed,
                     verbose=args.verbose,
+                    use_cot=use_cot,
+                    cot_max_tokens=cot_max_tokens,
                 )
             except Exception as exc:
                 print(

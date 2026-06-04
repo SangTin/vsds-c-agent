@@ -16,7 +16,7 @@ def answer_question(
         return Prediction(q.qid, fallback_letter)
 
     try:
-        answer = llm.answer_mcq(q.question, q.choices)
+        answer = llm.answer(q.question, q.choices)
         validated = validate_letter(answer, len(q.choices), fallback_letter)
         return Prediction(q.qid, validated)
     except Exception as exc:

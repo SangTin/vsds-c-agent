@@ -51,3 +51,22 @@ python entrypoint.py --data-dir ../data --output-dir ../output --model-path mode
 ```
 
 If VRAM runs out, lower `--n-gpu-layers`; try `15`, `10`, `5`, or `0`.
+
+## v2 — CoT + 10-choice fix
+
+v1 scored **66.52%** accuracy on the public-test leaderboard. v2 adds a prompt
+hint that explicitly asks the model to consider every choice on questions with
+more than four options, plus an optional two-step chain-of-thought path. v2
+measured accuracy is **TBD**.
+
+Enable CoT with `--cot`, or set `model.use_cot: true` in `config.yaml`. Use
+`--no-cot` to override an enabled config value. `model.cot_max_tokens` controls
+the reasoning budget and defaults to `200`. Because CoT performs a reasoning
+generation followed by constrained letter extraction, expect roughly 3-4x the
+v1 time per question.
+
+Run the full public-test CoT evaluation with:
+
+```bash
+bash scripts/eval_full_cot.sh
+```

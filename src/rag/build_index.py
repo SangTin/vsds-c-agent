@@ -7,6 +7,13 @@ FAISS owns the final fp32 matrix as buffers are added.
 Periodic checkpointing (--checkpoint-interval) writes the in-progress index and
 metadata to the same output paths so a disconnected Colab session can be
 resumed with --resume.
+
+When the output paths are on a FUSE-mounted filesystem (Google Drive in Colab),
+the hot-path metadata writes can stay in the FUSE buffer for minutes before
+syncing to the cloud. A disconnect inside that window silently loses the most
+recent checkpoint. This script writes to a local staging directory (--staging-dir,
+default /tmp) and only touches the final paths via a copy+fsync+atomic rename
+at checkpoint boundaries.
 """
 
 from __future__ import annotations
@@ -14,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -56,6 +64,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--resume",
         action="store_true",
         help="Load existing --index-out and --metadata-out and skip already-embedded chunks.",
+    )
+    parser.add_argument(
+        "--staging-dir",
+        type=Path,
+        default=Path("/tmp"),
+        help="Local-disk directory used as a write buffer before copying to "
+        "--index-out / --metadata-out. Bypasses FUSE buffering on Drive mounts.",
     )
     return parser.parse_args(argv)
 
@@ -104,6 +119,26 @@ def _truncate_jsonl(path: Path, keep: int) -> None:
     tmp.replace(path)
 
 
+def _sync_to_drive(local_path: Path, remote_path: Path) -> float:
+    """Copy a local file to a FUSE-mounted path with fsync + atomic rename.
+
+    Returns elapsed seconds. Skips work if the local file is missing.
+    """
+    if not local_path.exists():
+        return 0.0
+    start = time.perf_counter()
+    remote_path.parent.mkdir(parents=True, exist_ok=True)
+    remote_tmp = remote_path.with_suffix(remote_path.suffix + ".part")
+    shutil.copyfile(local_path, remote_tmp)
+    try:
+        with remote_tmp.open("rb") as f:
+            os.fsync(f.fileno())
+    except OSError:
+        pass  # FUSE may not honor fsync; rename below still forces visibility
+    os.replace(remote_tmp, remote_path)
+    return time.perf_counter() - start
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.batch_size < 1:
@@ -113,18 +148,21 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args.index_out.parent.mkdir(parents=True, exist_ok=True)
     args.metadata_out.parent.mkdir(parents=True, exist_ok=True)
+    args.staging_dir.mkdir(parents=True, exist_ok=True)
+
+    staging_index = args.staging_dir / args.index_out.name
+    staging_metadata = args.staging_dir / args.metadata_out.name
 
     resume_offset = 0
     metadata_mode = "w"
     if args.resume and args.index_out.exists() and args.metadata_out.exists():
-        index = faiss.read_index(str(args.index_out))
+        # Pull both files into staging so the run is decoupled from the FUSE mount.
+        shutil.copyfile(args.index_out, staging_index)
+        shutil.copyfile(args.metadata_out, staging_metadata)
+        index = faiss.read_index(str(staging_index))
         resume_offset = index.ntotal
-        meta_lines = _count_lines(args.metadata_out)
+        meta_lines = _count_lines(staging_metadata)
         if meta_lines > resume_offset:
-            # Metadata flushes every buffer (2k chunks); index only at checkpoint.
-            # A mid-checkpoint disconnect leaves extra metadata lines whose vectors
-            # were lost from in-memory. Truncate metadata to match the saved index;
-            # those chunks will be re-embedded.
             print(
                 f"Metadata has {meta_lines:,} lines but index has {resume_offset:,} "
                 f"vectors. Truncating metadata to match (lost "
@@ -132,21 +170,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
                 flush=True,
             )
-            _truncate_jsonl(args.metadata_out, resume_offset)
+            _truncate_jsonl(staging_metadata, resume_offset)
         elif meta_lines < resume_offset:
             raise ValueError(
                 f"Index has {resume_offset} vectors but metadata only "
-                f"{meta_lines} lines. Index is ahead of metadata — delete both "
-                f"and rebuild from scratch."
+                f"{meta_lines} lines. Index is ahead of metadata. To recover, "
+                f"copy the first {resume_offset} lines of {args.chunks} into "
+                f"{args.metadata_out} before resuming."
             )
         metadata_mode = "a"
         print(
-            f"Resuming from checkpoint at {resume_offset:,} chunks",
+            f"Resuming from checkpoint at {resume_offset:,} chunks (staged at {staging_index})",
             file=sys.stderr,
             flush=True,
         )
     else:
         index = faiss.IndexFlatIP(DIMENSION)
+        staging_index.unlink(missing_ok=True)
+        staging_metadata.unlink(missing_ok=True)
 
     embedder = BGEEmbedder(device=args.device, max_length=args.max_length)
 
@@ -175,12 +216,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         texts.clear()
         records.clear()
         if args.checkpoint_interval > 0 and processed >= next_checkpoint:
-            ckpt_start = time.perf_counter()
-            faiss.write_index(index, str(args.index_out))
-            ckpt_elapsed = time.perf_counter() - ckpt_start
+            local_start = time.perf_counter()
+            faiss.write_index(index, str(staging_index))
+            metadata_file.flush()
+            os.fsync(metadata_file.fileno())
+            local_elapsed = time.perf_counter() - local_start
+            sync_index = _sync_to_drive(staging_index, args.index_out)
+            sync_meta = _sync_to_drive(staging_metadata, args.metadata_out)
             print(
-                f"Checkpoint saved at {processed:,} chunks "
-                f"(index.ntotal={index.ntotal:,}, wrote in {ckpt_elapsed:.1f}s)",
+                f"Checkpoint at {processed:,} chunks: local write {local_elapsed:.1f}s, "
+                f"drive sync index {sync_index:.1f}s + metadata {sync_meta:.1f}s "
+                f"(index.ntotal={index.ntotal:,})",
                 file=sys.stderr,
                 flush=True,
             )
@@ -189,7 +235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     skipped = 0
     with (
         args.chunks.open("rb") as chunks_file,
-        args.metadata_out.open(metadata_mode, encoding="utf-8") as metadata_file,
+        staging_metadata.open(metadata_mode, encoding="utf-8") as metadata_file,
     ):
         for raw_line in chunks_file:
             bytes_read += len(raw_line)
@@ -208,12 +254,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     next_progress += PROGRESS_INTERVAL
         flush(metadata_file)
 
-    faiss.write_index(index, str(args.index_out))
+    # Final write: stage on local, then commit to drive.
+    faiss.write_index(index, str(staging_index))
+    sync_index = _sync_to_drive(staging_index, args.index_out)
+    sync_meta = _sync_to_drive(staging_metadata, args.metadata_out)
     elapsed = time.perf_counter() - started
     new_chunks = processed - resume_offset
     print(
         f"Wrote {processed:,} vectors to {args.index_out} and metadata to "
-        f"{args.metadata_out} ({new_chunks:,} new in {elapsed / 60:.1f} min)",
+        f"{args.metadata_out} ({new_chunks:,} new in {elapsed / 60:.1f} min; "
+        f"final drive sync: index {sync_index:.1f}s + metadata {sync_meta:.1f}s)",
         file=sys.stderr,
     )
     sys.stdout.flush()

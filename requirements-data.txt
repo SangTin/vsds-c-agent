@@ -1,0 +1,5 @@
+# Data prep only — NOT installed in the runtime Docker image.
+# Install on WSL host to build the RAG corpus once, then mount the
+# resulting JSONL/FAISS index into the container.
+datasets>=2.18
+tqdm>=4.66

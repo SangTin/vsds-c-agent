@@ -109,9 +109,28 @@ The viwiki index and the BGE-m3 / FAISS pipeline remain in the codebase (behind
 the default-off `--rag` flag) so the experiment is reproducible and the decision
 is auditable.
 
-## 7. Artifacts
+## 7. Re-test on the stronger model (Qwen3.5-9B)
 
-- `results/pred-v3-rag.csv` — RAG predictions (463)
+A fair objection: the negative result was on Qwen2.5-7B; maybe a stronger model
+would use the retrieved context better. We re-ran the full stack on Qwen3.5-9B
+(the submission model) with RAG + tools, versus tools-only:
+
+| Config (Qwen3.5-9B) | Agreement vs proxy |
+|---|---|
+| tools-only (submission) | 86.83% |
+| RAG + tools | 84.02% (**−2.81 pp**) |
+
+RAG changed 37 answers: 8 fixed, **21 regressed**, 8 unclear. Still net-negative.
+The stronger model is *less* distracted (−2.81 vs −5.40 on Qwen2.5) but the sign
+does not flip. This rules out "model too weak" as the cause and confirms the real
+bottleneck is **corpus coverage** (general Wikipedia rarely contains the answer to
+VN-specific curriculum/law/policy questions), not model capacity.
+
+## 8. Artifacts
+
+- `results/pred-v3-rag.csv` — RAG predictions, Qwen2.5 (463)
+- `results/pred-v5-rag-tools-qwen35.csv` — RAG+tools, Qwen3.5 (463)
 - `results/scores.csv` — per-question top-1 retrieval similarity
-- `src/rag/` — embedder, retriever, index builder (reproducible)
-- Baseline `pred` (66.52%) is the current submission of record.
+- `src/rag/` — embedder, retriever, index builder (reproducible, behind `--rag`)
+- viwiki index backed up at HF dataset `suzueyume/vsds-c-viwiki-index` (private).
+- Submission of record: Qwen3.5-9B + tools, 82.29%.

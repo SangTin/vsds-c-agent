@@ -70,3 +70,41 @@ def test_unsupported_extension_fails(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Unsupported input extension"):
         load_questions(path)
+
+
+def test_json_tolerates_extra_keys(tmp_path: Path) -> None:
+    path = tmp_path / "extra.json"
+    path.write_text(
+        json.dumps(
+            [{"qid": "q1", "question": "X?", "choices": ["A", "B"], "category": "z", "id": 7}]
+        ),
+        encoding="utf-8",
+    )
+    questions = load_questions(path)
+    assert questions[0].choices == ["A", "B"]
+
+
+def test_csv_letter_columns_layout(tmp_path: Path) -> None:
+    path = tmp_path / "letters.csv"
+    with path.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["id", "qid", "question", "A", "B", "C", "D"])
+        writer.writerow(["0", "q1", "Pick?", "Hà Nội", "Huế", "Đà Nẵng", "TP.HCM"])
+        writer.writerow(["1", "q2", "Two?", "Yes", "No", "", ""])
+
+    questions = load_questions(path)
+    assert questions[0].choices == ["Hà Nội", "Huế", "Đà Nẵng", "TP.HCM"]
+    # Trailing empty letter columns are trimmed.
+    assert questions[1].choices == ["Yes", "No"]
+
+
+def test_csv_with_bom_and_extra_column(tmp_path: Path) -> None:
+    path = tmp_path / "bom.csv"
+    # Leading BOM + an extra 'category' column (Excel-style export).
+    content = "﻿qid,question,choices,category\n"
+    content += 'q1,"First?","[""One"", ""Two""]",x\n'
+    path.write_text(content, encoding="utf-8")
+
+    questions = load_questions(path)
+    assert questions[0].qid == "q1"
+    assert questions[0].choices == ["One", "Two"]

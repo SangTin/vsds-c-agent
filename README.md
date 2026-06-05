@@ -124,3 +124,47 @@ If the code raises or prints nothing, the error is fed back once and the model
 gets one repair attempt. The printed result is then given back to the grammar
 constrained MCQ selector. Any tool failure falls back to the normal v1 answer
 path, so tools never break batch output.
+
+## Docker (submission)
+
+Submission config: **Qwen3.5-9B-Instruct Q4_K_M GGUF + Program-of-Thought
+tools**, scored **82.29%** on the public leaderboard. RAG is deliberately
+excluded from the Docker image because the experiment was net-negative: the
+image does not install `FlagEmbedding`, `faiss`, `torch`,
+`sentence-transformers`, or bake `data_kb/` / FAISS indexes. The `--rag` code
+path remains in the repository but is off by default and must not be used for
+the submission container.
+
+One-time GGUF download before building:
+
+```bash
+pip install -U huggingface_hub
+hf download unsloth/Qwen3.5-9B-GGUF Qwen3.5-9B-Q4_K_M.gguf --local-dir models/qwen3.5-9b
+```
+
+Build the offline submission image:
+
+```bash
+bash scripts/docker_build.sh
+```
+
+Run with GPU:
+
+```bash
+bash scripts/docker_run.sh
+```
+
+Offline CPU smoke test:
+
+```bash
+docker run --rm --network none \
+  -v "$PWD/../data":/data \
+  -v "$PWD/../output":/output \
+  vsds-bangc:latest
+```
+
+The image auto-selects GPU offload when `/dev/nvidia0` or `nvidia-smi` is
+visible, otherwise it runs on CPU. Override with `--n-gpu-layers N` or
+`BANGC_N_GPU_LAYERS=N`. Determinism is preserved with `seed=42`,
+`temperature=0`, and the local sympy sandbox, satisfying the BTC requirement
+for "chay >=3 lan on dinh".

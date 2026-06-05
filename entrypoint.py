@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import sys
 import time
 import traceback
@@ -40,6 +42,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 
+def resolve_gpu_layers(explicit: int | None) -> int:
+    if explicit is not None:
+        return explicit
+    env_value = os.environ.get("BANGC_N_GPU_LAYERS")
+    if env_value is not None:
+        return int(env_value)
+    if os.path.exists("/dev/nvidia0") or shutil.which("nvidia-smi"):
+        return 99
+    return 0
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     config_parser = argparse.ArgumentParser(add_help=False)
     config_parser.add_argument("--config", type=Path, default=Path("config.yaml"))
@@ -52,9 +65,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("/output"))
     parser.add_argument("--config", type=Path, default=Path("config.yaml"))
     parser.add_argument("--model-path", type=Path, default=None)
-    parser.add_argument(
-        "--n-gpu-layers", type=int, default=model_config["n_gpu_layers"]
-    )
+    parser.add_argument("--n-gpu-layers", type=int, default=None)
     parser.add_argument("--n-ctx", type=int, default=model_config["n_ctx"])
     parser.add_argument("--seed", type=int, default=model_config["seed"])
     parser.add_argument("--cot", action="store_true", default=None)
@@ -186,6 +197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         use_tools = config["model"]["use_tools"] if args.tools is None else args.tools
         tool_timeout = args.tool_timeout
+        n_gpu_layers = resolve_gpu_layers(args.n_gpu_layers)
         rag_enabled = config["rag"]["enabled"] if args.rag is None else args.rag
         rag_index = args.rag_index or Path(config["rag"]["index_path"])
         rag_metadata = args.rag_metadata or Path(config["rag"]["metadata_path"])
@@ -199,7 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Input: {input_path}")
             print(f"Config: {args.config if args.config.is_file() else 'defaults'}")
             print(f"Model path: {model_path}")
-            print(f"n_gpu_layers: {args.n_gpu_layers}")
+            print(f"n_gpu_layers: {n_gpu_layers}")
             print(f"n_ctx: {args.n_ctx}")
             print(f"seed: {args.seed}")
             print(f"use_cot: {use_cot}")
@@ -219,7 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             try:
                 llm = LLMAnswerer(
                     model_path=model_path,
-                    n_gpu_layers=args.n_gpu_layers,
+                    n_gpu_layers=n_gpu_layers,
                     n_ctx=args.n_ctx,
                     seed=args.seed,
                     verbose=args.verbose,

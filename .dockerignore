@@ -1,19 +1,23 @@
-__pycache__/
-*.pyc
+.git/
 .pytest_cache/
+.tmp/
 .venv/
 venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.log
 
-models/
-*.gguf
-
+data_kb/
+docs/
 output/
-pred.csv
-
-.vscode/
-.idea/
-
+results/
+sample_data/
 tests/
-scripts/
-.git/
-*.md
+
+# Keep the submission GGUF copyable while excluding other local weights.
+models/*
+!models/qwen3.5-9b/
+models/qwen3.5-9b/*
+!models/qwen3.5-9b/*.gguf

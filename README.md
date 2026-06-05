@@ -159,6 +159,60 @@ fires only when `is_law_question` detects a law question and the top legal
 retrieval score is at least `--legal-min-score`; otherwise the pipeline answers
 directly with no injected context.
 
+## Political-theory RAG pilot (experimental, opt-in)
+
+This second targeted RAG pilot mirrors the legal path with a separate router,
+separate FAISS index, and separate CLI/config flags. It targets the five
+mandatory Vietnamese university political-theory subjects: Triết học
+Mác-Lênin, Kinh tế Chính trị Mác-Lênin, Chủ nghĩa Xã hội Khoa học, Tư tưởng
+Hồ Chí Minh, and Lịch sử Đảng CSVN. Keep it only if measured net-positive
+against the tools-only Qwen3.5 baseline.
+
+Prepare the hybrid corpus:
+
+```bash
+python scripts/fetch_polysci.py
+```
+
+`fetch_polysci.py` downloads the two Duy Tan University PDFs with stable direct
+URLs into `data_kb/polysci/raw/`: Triết học Mác-Lênin and Kinh tế Chính trị
+Mác-Lênin. Manually drop the remaining three PDFs into the same directory:
+
+```text
+data_kb/polysci/raw/tu-tuong-ho-chi-minh.pdf
+data_kb/polysci/raw/chu-nghia-xa-hoi-khoa-hoc.pdf
+data_kb/polysci/raw/lich-su-dang-cong-san-vn.pdf
+```
+
+Chunk every PDF in the raw directory, then build the separate polysci index:
+
+```bash
+python scripts/build_targeted_corpus.py \
+  --raw data_kb/polysci/raw \
+  --out data_kb/polysci/chunks.jsonl
+bash scripts/build_polysci_index.sh
+```
+
+Run with polysci RAG, optionally alongside legal RAG:
+
+```bash
+python entrypoint.py \
+  --data-dir ../data \
+  --output-dir ../output \
+  --tools \
+  --legal-rag \
+  --polysci-rag \
+  --polysci-device cuda \
+  --model-path models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf \
+  --n-gpu-layers 99 \
+  --verbose
+```
+
+Polysci RAG fires only after the math and legal routers decline the question.
+If `is_polysci_question` detects a political-theory cue and the top retrieval
+score is at least `--polysci-min-score`, the pipeline injects textbook context;
+otherwise it answers directly with no injected context.
+
 ## Docker (submission)
 
 Submission config: **Qwen3.5-9B-Instruct Q4_K_M GGUF + Program-of-Thought

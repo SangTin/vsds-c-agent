@@ -47,6 +47,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "device": "cpu",
         "model_name": "BAAI/bge-m3",
     },
+    "polysci_rag": {
+        "enabled": False,
+        "index_path": "data_kb/polysci/index.faiss",
+        "metadata_path": "data_kb/polysci/metadata.jsonl",
+        "top_k": 3,
+        "min_score": 0.0,
+        "device": "cpu",
+        "model_name": "BAAI/bge-m3",
+    },
     "output": {"fallback_answer": "A"},
 }
 
@@ -68,6 +77,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     config_args, _ = config_parser.parse_known_args(argv)
     config = load_config(config_args.config)
     model_config = config["model"]
+    legal_rag_config = config["legal_rag"]
+    polysci_rag_config = config["polysci_rag"]
 
     parser = argparse.ArgumentParser(description="Run the Bang C answer pipeline.")
     parser.add_argument("--data-dir", type=Path, default=Path("/data"))
@@ -95,11 +106,54 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rag-device", choices=("cpu", "cuda"), default=None)
     parser.add_argument("--legal-rag", action="store_true", default=None)
     parser.add_argument("--no-legal-rag", action="store_false", dest="legal_rag")
-    parser.add_argument("--legal-index", type=Path, default=None)
-    parser.add_argument("--legal-metadata", type=Path, default=None)
-    parser.add_argument("--legal-top-k", type=int, default=None)
-    parser.add_argument("--legal-min-score", type=float, default=None)
-    parser.add_argument("--legal-device", choices=("cpu", "cuda"), default=None)
+    parser.add_argument(
+        "--legal-index",
+        type=Path,
+        default=Path(legal_rag_config["index_path"]),
+    )
+    parser.add_argument(
+        "--legal-metadata",
+        type=Path,
+        default=Path(legal_rag_config["metadata_path"]),
+    )
+    parser.add_argument("--legal-top-k", type=int, default=legal_rag_config["top_k"])
+    parser.add_argument(
+        "--legal-min-score",
+        type=float,
+        default=legal_rag_config["min_score"],
+    )
+    parser.add_argument(
+        "--legal-device",
+        choices=("cpu", "cuda"),
+        default=legal_rag_config["device"],
+    )
+    parser.add_argument("--polysci-rag", action="store_true", default=None)
+    parser.add_argument("--no-polysci-rag", action="store_false", dest="polysci_rag")
+    parser.add_argument(
+        "--polysci-index",
+        type=Path,
+        default=Path(polysci_rag_config["index_path"]),
+    )
+    parser.add_argument(
+        "--polysci-metadata",
+        type=Path,
+        default=Path(polysci_rag_config["metadata_path"]),
+    )
+    parser.add_argument(
+        "--polysci-top-k",
+        type=int,
+        default=polysci_rag_config["top_k"],
+    )
+    parser.add_argument(
+        "--polysci-min-score",
+        type=float,
+        default=polysci_rag_config["min_score"],
+    )
+    parser.add_argument(
+        "--polysci-device",
+        choices=("cpu", "cuda"),
+        default=polysci_rag_config["device"],
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
 
@@ -120,10 +174,12 @@ def load_config(path: Path) -> dict[str, Any]:
     model = loaded.get("model")
     rag = loaded.get("rag")
     legal_rag = loaded.get("legal_rag")
+    polysci_rag = loaded.get("polysci_rag")
     output = loaded.get("output")
     model_defaults = DEFAULT_CONFIG["model"]
     rag_defaults = DEFAULT_CONFIG["rag"]
     legal_rag_defaults = DEFAULT_CONFIG["legal_rag"]
+    polysci_rag_defaults = DEFAULT_CONFIG["polysci_rag"]
     output_defaults = DEFAULT_CONFIG["output"]
     if not isinstance(model, dict):
         model = {}
@@ -133,6 +189,8 @@ def load_config(path: Path) -> dict[str, Any]:
         rag = {}
     if not isinstance(legal_rag, dict):
         legal_rag = {}
+    if not isinstance(polysci_rag, dict):
+        polysci_rag = {}
 
     path = model.get("path", model_defaults["path"])
     n_gpu_layers = model.get("n_gpu_layers", model_defaults["n_gpu_layers"])
@@ -165,6 +223,28 @@ def load_config(path: Path) -> dict[str, Any]:
     )
     legal_device = legal_rag.get("device", legal_rag_defaults["device"])
     legal_model_name = legal_rag.get("model_name", legal_rag_defaults["model_name"])
+    polysci_rag_enabled = polysci_rag.get(
+        "enabled",
+        polysci_rag_defaults["enabled"],
+    )
+    polysci_index_path = polysci_rag.get(
+        "index_path",
+        polysci_rag_defaults["index_path"],
+    )
+    polysci_metadata_path = polysci_rag.get(
+        "metadata_path",
+        polysci_rag_defaults["metadata_path"],
+    )
+    polysci_top_k = polysci_rag.get("top_k", polysci_rag_defaults["top_k"])
+    polysci_min_score = polysci_rag.get(
+        "min_score",
+        polysci_rag_defaults["min_score"],
+    )
+    polysci_device = polysci_rag.get("device", polysci_rag_defaults["device"])
+    polysci_model_name = polysci_rag.get(
+        "model_name",
+        polysci_rag_defaults["model_name"],
+    )
     if not isinstance(path, str):
         path = model_defaults["path"]
     if not isinstance(n_gpu_layers, int):
@@ -209,6 +289,20 @@ def load_config(path: Path) -> dict[str, Any]:
         legal_device = legal_rag_defaults["device"]
     if not isinstance(legal_model_name, str):
         legal_model_name = legal_rag_defaults["model_name"]
+    if not isinstance(polysci_rag_enabled, bool):
+        polysci_rag_enabled = polysci_rag_defaults["enabled"]
+    if not isinstance(polysci_index_path, str):
+        polysci_index_path = polysci_rag_defaults["index_path"]
+    if not isinstance(polysci_metadata_path, str):
+        polysci_metadata_path = polysci_rag_defaults["metadata_path"]
+    if not isinstance(polysci_top_k, int) or polysci_top_k < 1:
+        polysci_top_k = polysci_rag_defaults["top_k"]
+    if not isinstance(polysci_min_score, (int, float)):
+        polysci_min_score = polysci_rag_defaults["min_score"]
+    if not isinstance(polysci_device, str) or polysci_device not in {"cpu", "cuda"}:
+        polysci_device = polysci_rag_defaults["device"]
+    if not isinstance(polysci_model_name, str):
+        polysci_model_name = polysci_rag_defaults["model_name"]
 
     return {
         "model": {
@@ -237,6 +331,15 @@ def load_config(path: Path) -> dict[str, Any]:
             "min_score": float(legal_min_score),
             "device": legal_device,
             "model_name": legal_model_name,
+        },
+        "polysci_rag": {
+            "enabled": polysci_rag_enabled,
+            "index_path": polysci_index_path,
+            "metadata_path": polysci_metadata_path,
+            "top_k": polysci_top_k,
+            "min_score": float(polysci_min_score),
+            "device": polysci_device,
+            "model_name": polysci_model_name,
         },
         "output": {"fallback_answer": fallback},
     }
@@ -270,22 +373,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.legal_rag is None
             else args.legal_rag
         )
-        legal_index = args.legal_index or Path(config["legal_rag"]["index_path"])
-        legal_metadata = args.legal_metadata or Path(
-            config["legal_rag"]["metadata_path"]
-        )
-        legal_top_k = (
-            config["legal_rag"]["top_k"]
-            if args.legal_top_k is None
-            else args.legal_top_k
-        )
-        legal_min_score = (
-            config["legal_rag"]["min_score"]
-            if args.legal_min_score is None
-            else args.legal_min_score
-        )
-        legal_device = args.legal_device or config["legal_rag"]["device"]
+        legal_index = args.legal_index
+        legal_metadata = args.legal_metadata
+        legal_top_k = args.legal_top_k
+        legal_min_score = args.legal_min_score
+        legal_device = args.legal_device
         legal_model_name = config["legal_rag"]["model_name"]
+        polysci_rag_enabled = (
+            config["polysci_rag"]["enabled"]
+            if args.polysci_rag is None
+            else args.polysci_rag
+        )
+        polysci_index = args.polysci_index
+        polysci_metadata = args.polysci_metadata
+        polysci_top_k = args.polysci_top_k
+        polysci_min_score = args.polysci_min_score
+        polysci_device = args.polysci_device
+        polysci_model_name = config["polysci_rag"]["model_name"]
         input_path = discover_input(args.data_dir)
         if args.verbose:
             print(f"Input: {input_path}")
@@ -307,6 +411,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Legal RAG min_score: {legal_min_score}")
             print(f"Legal RAG index path: {legal_index}")
             print(f"Legal RAG embedder device: {legal_device}")
+            print(f"Polysci RAG requested: {polysci_rag_enabled}")
+            print(f"Polysci RAG top_k: {polysci_top_k}")
+            print(f"Polysci RAG min_score: {polysci_min_score}")
+            print(f"Polysci RAG index path: {polysci_index}")
+            print(f"Polysci RAG embedder device: {polysci_device}")
 
         questions = load_questions(input_path)
         print(f"Questions read: {len(questions)}")
@@ -392,6 +501,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.verbose:
             print(f"Legal RAG enabled: {legal_retriever is not None}")
 
+        polysci_retriever: FaissRetriever | None = None
+        if polysci_rag_enabled:
+            try:
+                if not polysci_index.is_file():
+                    raise FileNotFoundError(f"index file not found: {polysci_index}")
+                if not polysci_metadata.is_file():
+                    raise FileNotFoundError(
+                        f"metadata file not found: {polysci_metadata}"
+                    )
+                polysci_embedder = BGEEmbedder(
+                    model_name=polysci_model_name,
+                    device=polysci_device,
+                    verbose=args.verbose,
+                )
+                polysci_retriever = FaissRetriever(
+                    index_path=polysci_index,
+                    metadata_path=polysci_metadata,
+                    embedder=polysci_embedder,
+                    top_k=polysci_top_k,
+                    verbose=args.verbose,
+                )
+            except Exception as exc:
+                print(
+                    f"Polysci RAG disabled, falling back to direct LLM: {exc}",
+                    file=sys.stderr,
+                )
+        if args.verbose:
+            print(f"Polysci RAG enabled: {polysci_retriever is not None}")
+
         tool_runner: Callable[[str], dict[str, Any]] | None = None
         if use_tools:
             from src.tools.sandbox import run_python
@@ -418,6 +556,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     run_python=tool_runner,
                     legal_retriever=legal_retriever,
                     legal_min_score=legal_min_score,
+                    polysci_retriever=polysci_retriever,
+                    polysci_min_score=polysci_min_score,
                 )
             )
         output_path = args.output_dir / "pred.csv"

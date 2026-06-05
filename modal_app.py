@@ -1,9 +1,10 @@
-"""Run the legal-RAG pilot eval on a Modal serverless GPU (free-tier friendly).
+"""Run the targeted-RAG pilot eval on a Modal serverless GPU (free-tier friendly).
 
 Replaces renting a GPU box: defines a CUDA image with our deps, caches the
-Qwen3.5-9B GGUF + the UTS_VLC legal FAISS index in a Modal Volume, then runs the
-full 463-question public test with --tools --legal-rag and writes the predictions
-back to the local ../output/ directory for comparison against the 82.29% v4 run.
+Qwen3.5-9B GGUF + targeted FAISS indexes in a Modal Volume, then runs the full
+463-question public test with tools and targeted RAG flags. Predictions are
+written back to the local ../output/ directory for comparison against the 82.29%
+v4 run.
 
 Usage (from bang-c-agent/, after `modal setup`):
     modal run modal_app.py                 # build assets if needed, then eval
@@ -33,6 +34,7 @@ image = (
         "faiss-cpu>=1.8",
         "datasets>=2.18",
         "pyyaml",
+        "pypdf",
         "huggingface_hub<1.0",
     )
     # Prebuilt CUDA 12.4 wheel — no source build (avoids needing a C/C++ toolchain
@@ -42,7 +44,19 @@ image = (
         extra_index_url="https://abetlen.github.io/llama-cpp-python/whl/cu124",
     )
     # Ship the repo code into the image (latest local state).
-    .add_local_dir(".", "/app", ignore=["data_kb", "models", ".venv*", ".git", "results"])
+    .add_local_dir(
+        ".",
+        "/app",
+        ignore=[
+            "data_kb/viwiki",
+            "data_kb/legal",
+            "models",
+            ".venv*",
+            ".git",
+            "results",
+            "*.gguf",
+        ],
+    )
 )
 
 app = modal.App("vsds-legal-rag")
@@ -61,8 +75,10 @@ def ensure_assets(rebuild_index: bool = False) -> dict:
     sys.path.insert(0, "/app")
     model_dir = f"{CACHE}/qwen3.5-9b"
     legal_dir = f"{CACHE}/legal"
+    polysci_dir = f"{CACHE}/polysci"
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(legal_dir, exist_ok=True)
+    os.makedirs(polysci_dir, exist_ok=True)
 
     model_path = f"{model_dir}/{MODEL_FILE}"
     if not os.path.exists(model_path):
@@ -87,12 +103,54 @@ def ensure_assets(rebuild_index: bool = False) -> dict:
             ],
             check=True,
         )
+    polysci_raw = "/app/data_kb/polysci/raw"
+    try:
+        polysci_pdfs = [
+            name
+            for name in os.listdir(polysci_raw)
+            if name.lower().endswith(".pdf")
+        ]
+    except FileNotFoundError:
+        polysci_pdfs = []
+    polysci_index_path = f"{polysci_dir}/index.faiss"
+    polysci_metadata_path = f"{polysci_dir}/metadata.jsonl"
+    if polysci_pdfs and (
+        rebuild_index
+        or not os.path.exists(polysci_index_path)
+        or not os.path.exists(polysci_metadata_path)
+    ):
+        polysci_chunks = f"{polysci_dir}/chunks.jsonl"
+        subprocess.run(
+            [
+                sys.executable,
+                "scripts/build_targeted_corpus.py",
+                "--raw",
+                polysci_raw,
+                "--out",
+                polysci_chunks,
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                sys.executable, "-m", "src.rag.build_index",
+                "--chunks", polysci_chunks,
+                "--index-out", polysci_index_path,
+                "--metadata-out", polysci_metadata_path,
+                "--device", "cuda", "--batch-size", "64", "--max-length", "512",
+            ],
+            check=True,
+        )
     cache.commit()
-    return {"model": model_path, "index": index_path}
+    return {
+        "model": model_path,
+        "index": index_path,
+        "polysci_index": polysci_index_path if polysci_pdfs else None,
+    }
 
 
 @app.function(image=image, gpu=GPU, volumes={CACHE: cache}, timeout=3600)
-def run_eval(legal_rag: bool = True) -> str:
+def run_eval(legal_rag: bool = True, polysci_rag: bool = True) -> str:
     """Run the full 463-question public test; return pred.csv content."""
     import os
     import subprocess
@@ -133,6 +191,12 @@ def run_eval(legal_rag: bool = True) -> str:
             "--legal-index", f"{CACHE}/legal/index.faiss",
             "--legal-metadata", f"{CACHE}/legal/metadata.jsonl",
         ]
+    if polysci_rag:
+        cmd += [
+            "--polysci-rag", "--polysci-device", "cuda",
+            "--polysci-index", f"{CACHE}/polysci/index.faiss",
+            "--polysci-metadata", f"{CACHE}/polysci/metadata.jsonl",
+        ]
     subprocess.run(cmd, check=True)
     with open("/tmp/out/pred.csv", encoding="utf-8") as f:
         text = f.read()
@@ -153,9 +217,33 @@ def main(rebuild_index: bool = False):
 
     assets = ensure_assets.remote(rebuild_index=rebuild_index)
     print("assets ready:", assets)
-    pred = run_eval.remote(legal_rag=True)
-    out = Path("../output/pred-v6-legal-rag-qwen35.csv")
+    pred = run_eval.remote(legal_rag=True, polysci_rag=True)
+    out = Path("../output/pred-v7-law-polysci-rag-qwen35.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(pred, encoding="utf-8")
     rows = pred.strip().count("\n")
     print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
+def det_check():
+    """Run the full eval twice; assert byte-identical predictions.
+
+    BTC requires the pipeline to run >=3 times with stable output. PoT was
+    already verified deterministic; this confirms the legal-RAG path
+    (BGE-m3 GPU encode + FAISS + context-augmented selection) also is.
+    """
+    from pathlib import Path
+
+    ensure_assets.remote()
+    run1 = run_eval.remote(legal_rag=True)
+    run2 = run_eval.remote(legal_rag=True)
+    out_dir = Path("../output")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "pred-det1.csv").write_text(run1, encoding="utf-8")
+    (out_dir / "pred-det2.csv").write_text(run2, encoding="utf-8")
+    if run1 == run2:
+        print("DETERMINISTIC: 2 runs byte-identical")
+    else:
+        diffs = sum(1 for a, b in zip(run1.splitlines(), run2.splitlines()) if a != b)
+        print(f"NON-DETERMINISTIC: {diffs} differing lines between pred-det1.csv and pred-det2.csv")

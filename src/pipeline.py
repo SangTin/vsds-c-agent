@@ -8,7 +8,7 @@ from src.agent.loop import solve_with_tools
 from src.extract import validate_letter
 from src.llm import LLMAnswerer
 from src.rag.retriever import FaissRetriever
-from src.router import is_law_question, is_math_question
+from src.router import is_law_question, is_math_question, is_polysci_question
 from src.schema import Prediction, Question
 
 
@@ -34,15 +34,35 @@ def _direct_answer(
         return Prediction(q.qid, fallback_letter)
 
 
-def _legal_context(retrieved: list[dict[str, Any]]) -> str:
-    lines = ["Trích văn bản pháp luật liên quan:"]
+def _format_context(
+    retrieved: list[dict[str, Any]],
+    heading: str,
+    default_title: str,
+) -> str:
+    lines = [heading]
     for index, record in enumerate(retrieved, start=1):
         title = str(record.get("title", "")).strip()
         if not title:
-            title = str(record.get("doc_id", "Văn bản pháp luật"))
+            title = str(record.get("doc_id", default_title))
         text = str(record.get("text", ""))[:1500]
         lines.append(f"[{index}] {title}: {text}")
     return "\n".join(lines)
+
+
+def _legal_context(retrieved: list[dict[str, Any]]) -> str:
+    return _format_context(
+        retrieved,
+        "Trích văn bản pháp luật liên quan:",
+        "Văn bản pháp luật",
+    )
+
+
+def _polysci_context(retrieved: list[dict[str, Any]]) -> str:
+    return _format_context(
+        retrieved,
+        "Trích giáo trình lý luận chính trị:",
+        "Giáo trình lý luận chính trị",
+    )
 
 
 def answer_question(
@@ -54,6 +74,8 @@ def answer_question(
     run_python: Callable[[str], dict[str, Any]] | None = None,
     legal_retriever: FaissRetriever | None = None,
     legal_min_score: float = 0.0,
+    polysci_retriever: FaissRetriever | None = None,
+    polysci_min_score: float = 0.0,
 ) -> Prediction:
     """Answer one question with the LLM, falling back without breaking the batch."""
     fallback_letter = validate_letter(fallback, len(q.choices))
@@ -97,6 +119,33 @@ def answer_question(
         except Exception as exc:
             print(
                 f"Warning: legal RAG path failed for {q.qid!r}; "
+                f"falling back to direct answer: {exc}",
+                file=sys.stderr,
+            )
+        return _direct_answer(q, fallback_letter, llm)
+
+    if llm is not None and polysci_retriever is not None and is_polysci_question(
+        q.question,
+        q.choices,
+    ):
+        try:
+            polysci_chunks = polysci_retriever.retrieve(q.question)
+            top_score = (
+                float(polysci_chunks[0].get("score", 0.0))
+                if polysci_chunks
+                else 0.0
+            )
+            if polysci_chunks and top_score >= polysci_min_score:
+                answer = llm.answer_mcq(
+                    q.question,
+                    q.choices,
+                    context=_polysci_context(polysci_chunks),
+                )
+                validated = validate_letter(answer, len(q.choices), fallback_letter)
+                return Prediction(q.qid, validated)
+        except Exception as exc:
+            print(
+                f"Warning: polysci RAG path failed for {q.qid!r}; "
                 f"falling back to direct answer: {exc}",
                 file=sys.stderr,
             )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 
 
 _LATEX_RE = re.compile(
@@ -38,6 +39,28 @@ _LAW_KEYWORD_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _PASSAGE_MARKERS = ("đoạn thông tin:", "doan thong tin:")
+_POLYSCI_KEYWORD_RE = re.compile(
+    r"\b(?:"
+    r"ho chi minh|tu tuong|mac|lenin|angghen|"
+    r"chu nghia|duy vat|bien chung|"
+    r"kinh te chinh tri|gia tri thang du|tich luy tu ban|"
+    r"chu nghia xa hoi|chu nghia cong san|"
+    r"cach mang|giai cap|vo san|"
+    r"dang cong san|dang ta|cuong linh|dai hoi dang|"
+    r"phuong thuc san xuat|luc luong san xuat|quan he san xuat|"
+    r"hinh thai kinh te|duy vat lich su|duy vat bien chung|"
+    r"y thuc xa hoi|ton tai xa hoi"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _fold_vietnamese(text: str) -> str:
+    text = text.replace("đ", "d").replace("Đ", "D")
+    decomposed = unicodedata.normalize("NFD", text)
+    return "".join(
+        char for char in decomposed if unicodedata.category(char) != "Mn"
+    ).casefold()
 
 
 def _mostly_numeric_choices(choices: list[str]) -> bool:
@@ -98,3 +121,18 @@ def is_law_question(question: str, choices: list[str]) -> bool:
     ] == "quy ":
         return False
     return True
+
+
+def is_polysci_question(question: str, choices: list[str]) -> bool:
+    """Return True for the five mandatory political-theory subjects.
+
+    Precision over recall: the polysci index is a narrow textbook corpus, so we
+    route only named authors/subjects or canonical Marxist-Leninist concepts.
+    Passage questions already contain their own evidence and stay direct.
+    """
+    question_text = question.casefold()
+    if any(marker in question_text for marker in _PASSAGE_MARKERS):
+        return False
+
+    text = _fold_vietnamese("\n".join([question, *choices]))
+    return _POLYSCI_KEYWORD_RE.search(text) is not None

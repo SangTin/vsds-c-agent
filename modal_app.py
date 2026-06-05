@@ -22,7 +22,8 @@ GPU = "A10G"  # 24GB — Qwen3.5-9B full offload; cheap on free credit
 
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11")
-    .apt_install("git")
+    # libgomp1: required by the llama-cpp prebuilt wheel (links libgomp.so.1).
+    .apt_install("git", "libgomp1")
     .pip_install("torch", index_url="https://download.pytorch.org/whl/cu124")
     .pip_install(
         "FlagEmbedding==1.2.10",

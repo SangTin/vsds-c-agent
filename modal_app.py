@@ -99,6 +99,21 @@ def run_eval(legal_rag: bool = True) -> str:
 
     os.chdir("/app")
     model_path = f"{CACHE}/qwen3.5-9b/{MODEL_FILE}"
+
+    # Fail loud if anything that would silently route to stub: model file missing,
+    # llama_cpp not importable, or CUDA offload unavailable on this GPU. A silent
+    # stub fallback produces "all-A" predictions (we hit this once already).
+    if not os.path.exists(model_path):
+        raise RuntimeError(f"model not in volume: {model_path}")
+    try:
+        import llama_cpp
+    except Exception as exc:
+        raise RuntimeError(f"llama_cpp import failed in eval container: {exc}") from exc
+    if not llama_cpp.llama_supports_gpu_offload():
+        raise RuntimeError(
+            "llama-cpp wheel reports no GPU offload — would run on CPU and look like stub on time-out."
+        )
+
     os.makedirs("/tmp/data", exist_ok=True)
     os.makedirs("/tmp/out", exist_ok=True)
     subprocess.run(
@@ -119,7 +134,16 @@ def run_eval(legal_rag: bool = True) -> str:
         ]
     subprocess.run(cmd, check=True)
     with open("/tmp/out/pred.csv", encoding="utf-8") as f:
-        return f.read()
+        text = f.read()
+    # Sanity: a healthy run on Qwen3.5+tools uses A..J broadly; all-A means stub.
+    rows = [line.split(",")[1] for line in text.strip().splitlines()[1:]]
+    distinct = set(rows)
+    if len(distinct) <= 1:
+        raise RuntimeError(
+            f"eval collapsed to single letter {distinct} — LLM almost certainly fell to stub; "
+            f"check container logs above for 'LLM disabled, falling back to stub: ...'"
+        )
+    return text
 
 
 @app.local_entrypoint()

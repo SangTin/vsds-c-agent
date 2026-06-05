@@ -19,5 +19,14 @@ rag:
   device: cpu
   model_name: BAAI/bge-m3
 
+legal_rag:
+  enabled: false
+  index_path: data_kb/legal/index.faiss
+  metadata_path: data_kb/legal/metadata.jsonl
+  top_k: 3
+  min_score: 0.0
+  device: cpu
+  model_name: BAAI/bge-m3
+
 output:
   fallback_answer: "A"

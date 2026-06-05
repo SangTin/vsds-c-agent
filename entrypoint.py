@@ -38,6 +38,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "device": "cpu",
         "model_name": "BAAI/bge-m3",
     },
+    "legal_rag": {
+        "enabled": False,
+        "index_path": "data_kb/legal/index.faiss",
+        "metadata_path": "data_kb/legal/metadata.jsonl",
+        "top_k": 3,
+        "min_score": 0.0,
+        "device": "cpu",
+        "model_name": "BAAI/bge-m3",
+    },
     "output": {"fallback_answer": "A"},
 }
 
@@ -84,6 +93,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--rag-metadata", type=Path, default=None)
     parser.add_argument("--rag-top-k", type=int, default=None)
     parser.add_argument("--rag-device", choices=("cpu", "cuda"), default=None)
+    parser.add_argument("--legal-rag", action="store_true", default=None)
+    parser.add_argument("--no-legal-rag", action="store_false", dest="legal_rag")
+    parser.add_argument("--legal-index", type=Path, default=None)
+    parser.add_argument("--legal-metadata", type=Path, default=None)
+    parser.add_argument("--legal-top-k", type=int, default=None)
+    parser.add_argument("--legal-min-score", type=float, default=None)
+    parser.add_argument("--legal-device", choices=("cpu", "cuda"), default=None)
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
 
@@ -103,9 +119,11 @@ def load_config(path: Path) -> dict[str, Any]:
 
     model = loaded.get("model")
     rag = loaded.get("rag")
+    legal_rag = loaded.get("legal_rag")
     output = loaded.get("output")
     model_defaults = DEFAULT_CONFIG["model"]
     rag_defaults = DEFAULT_CONFIG["rag"]
+    legal_rag_defaults = DEFAULT_CONFIG["legal_rag"]
     output_defaults = DEFAULT_CONFIG["output"]
     if not isinstance(model, dict):
         model = {}
@@ -113,6 +131,8 @@ def load_config(path: Path) -> dict[str, Any]:
         output = {}
     if not isinstance(rag, dict):
         rag = {}
+    if not isinstance(legal_rag, dict):
+        legal_rag = {}
 
     path = model.get("path", model_defaults["path"])
     n_gpu_layers = model.get("n_gpu_layers", model_defaults["n_gpu_layers"])
@@ -129,6 +149,22 @@ def load_config(path: Path) -> dict[str, Any]:
     top_k = rag.get("top_k", rag_defaults["top_k"])
     device = rag.get("device", rag_defaults["device"])
     model_name = rag.get("model_name", rag_defaults["model_name"])
+    legal_rag_enabled = legal_rag.get("enabled", legal_rag_defaults["enabled"])
+    legal_index_path = legal_rag.get(
+        "index_path",
+        legal_rag_defaults["index_path"],
+    )
+    legal_metadata_path = legal_rag.get(
+        "metadata_path",
+        legal_rag_defaults["metadata_path"],
+    )
+    legal_top_k = legal_rag.get("top_k", legal_rag_defaults["top_k"])
+    legal_min_score = legal_rag.get(
+        "min_score",
+        legal_rag_defaults["min_score"],
+    )
+    legal_device = legal_rag.get("device", legal_rag_defaults["device"])
+    legal_model_name = legal_rag.get("model_name", legal_rag_defaults["model_name"])
     if not isinstance(path, str):
         path = model_defaults["path"]
     if not isinstance(n_gpu_layers, int):
@@ -159,6 +195,20 @@ def load_config(path: Path) -> dict[str, Any]:
         device = rag_defaults["device"]
     if not isinstance(model_name, str):
         model_name = rag_defaults["model_name"]
+    if not isinstance(legal_rag_enabled, bool):
+        legal_rag_enabled = legal_rag_defaults["enabled"]
+    if not isinstance(legal_index_path, str):
+        legal_index_path = legal_rag_defaults["index_path"]
+    if not isinstance(legal_metadata_path, str):
+        legal_metadata_path = legal_rag_defaults["metadata_path"]
+    if not isinstance(legal_top_k, int) or legal_top_k < 1:
+        legal_top_k = legal_rag_defaults["top_k"]
+    if not isinstance(legal_min_score, (int, float)):
+        legal_min_score = legal_rag_defaults["min_score"]
+    if not isinstance(legal_device, str) or legal_device not in {"cpu", "cuda"}:
+        legal_device = legal_rag_defaults["device"]
+    if not isinstance(legal_model_name, str):
+        legal_model_name = legal_rag_defaults["model_name"]
 
     return {
         "model": {
@@ -178,6 +228,15 @@ def load_config(path: Path) -> dict[str, Any]:
             "top_k": top_k,
             "device": device,
             "model_name": model_name,
+        },
+        "legal_rag": {
+            "enabled": legal_rag_enabled,
+            "index_path": legal_index_path,
+            "metadata_path": legal_metadata_path,
+            "top_k": legal_top_k,
+            "min_score": float(legal_min_score),
+            "device": legal_device,
+            "model_name": legal_model_name,
         },
         "output": {"fallback_answer": fallback},
     }
@@ -206,6 +265,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         rag_device = args.rag_device or config["rag"]["device"]
         rag_model_name = config["rag"]["model_name"]
+        legal_rag_enabled = (
+            config["legal_rag"]["enabled"]
+            if args.legal_rag is None
+            else args.legal_rag
+        )
+        legal_index = args.legal_index or Path(config["legal_rag"]["index_path"])
+        legal_metadata = args.legal_metadata or Path(
+            config["legal_rag"]["metadata_path"]
+        )
+        legal_top_k = (
+            config["legal_rag"]["top_k"]
+            if args.legal_top_k is None
+            else args.legal_top_k
+        )
+        legal_min_score = (
+            config["legal_rag"]["min_score"]
+            if args.legal_min_score is None
+            else args.legal_min_score
+        )
+        legal_device = args.legal_device or config["legal_rag"]["device"]
+        legal_model_name = config["legal_rag"]["model_name"]
         input_path = discover_input(args.data_dir)
         if args.verbose:
             print(f"Input: {input_path}")
@@ -222,6 +302,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"RAG top_k: {rag_top_k}")
             print(f"RAG index path: {rag_index}")
             print(f"RAG embedder device: {rag_device}")
+            print(f"Legal RAG requested: {legal_rag_enabled}")
+            print(f"Legal RAG top_k: {legal_top_k}")
+            print(f"Legal RAG min_score: {legal_min_score}")
+            print(f"Legal RAG index path: {legal_index}")
+            print(f"Legal RAG embedder device: {legal_device}")
 
         questions = load_questions(input_path)
         print(f"Questions read: {len(questions)}")
@@ -278,6 +363,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.verbose:
             print(f"RAG enabled: {retriever is not None}")
 
+        legal_retriever: FaissRetriever | None = None
+        if legal_rag_enabled:
+            try:
+                if not legal_index.is_file():
+                    raise FileNotFoundError(f"index file not found: {legal_index}")
+                if not legal_metadata.is_file():
+                    raise FileNotFoundError(
+                        f"metadata file not found: {legal_metadata}"
+                    )
+                legal_embedder = BGEEmbedder(
+                    model_name=legal_model_name,
+                    device=legal_device,
+                    verbose=args.verbose,
+                )
+                legal_retriever = FaissRetriever(
+                    index_path=legal_index,
+                    metadata_path=legal_metadata,
+                    embedder=legal_embedder,
+                    top_k=legal_top_k,
+                    verbose=args.verbose,
+                )
+            except Exception as exc:
+                print(
+                    f"Legal RAG disabled, falling back to direct LLM: {exc}",
+                    file=sys.stderr,
+                )
+        if args.verbose:
+            print(f"Legal RAG enabled: {legal_retriever is not None}")
+
         tool_runner: Callable[[str], dict[str, Any]] | None = None
         if use_tools:
             from src.tools.sandbox import run_python
@@ -302,6 +416,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     retriever,
                     use_tools=use_tools,
                     run_python=tool_runner,
+                    legal_retriever=legal_retriever,
+                    legal_min_score=legal_min_score,
                 )
             )
         output_path = args.output_dir / "pred.csv"

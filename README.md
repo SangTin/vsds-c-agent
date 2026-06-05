@@ -125,6 +125,40 @@ gets one repair attempt. The printed result is then given back to the grammar
 constrained MCQ selector. Any tool failure falls back to the normal v1 answer
 path, so tools never break batch output.
 
+## Legal RAG pilot (experimental, opt-in)
+
+This pilot tests a different RAG hypothesis from the dropped general Wikipedia
+RAG: a small, answer-dense Vietnamese legal corpus retrieved only for law
+questions. It is domain-gated, score-thresholded, and independent of `--rag`.
+Keep it only if measured net-positive against the tools-only Qwen3.5 baseline.
+
+Prepare the legal corpus and index:
+
+```bash
+python scripts/fetch_uts_vlc.py --split 2026
+bash scripts/build_legal_index.sh
+```
+
+Run with:
+
+```bash
+python entrypoint.py \
+  --data-dir ../data \
+  --output-dir ../output \
+  --tools \
+  --legal-rag \
+  --legal-min-score 0.0 \
+  --model-path models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf \
+  --n-gpu-layers 99 \
+  --verbose
+```
+
+The corpus is `undertheseanlp/UTS_VLC` split `2026` (about 24M chars). Expect
+roughly 16k chunks and about 20 minutes to build on a small GPU. Legal RAG
+fires only when `is_law_question` detects a law question and the top legal
+retrieval score is at least `--legal-min-score`; otherwise the pipeline answers
+directly with no injected context.
+
 ## Docker (submission)
 
 Submission config: **Qwen3.5-9B-Instruct Q4_K_M GGUF + Program-of-Thought

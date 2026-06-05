@@ -26,6 +26,18 @@ _DIRECT_MATH_KEYWORDS = (
     "phần trăm",
     "tỷ lệ",
 )
+_LAW_ARTICLE_RE = re.compile(r"\b(?:điều|dieu)\s+\d+", flags=re.IGNORECASE)
+_LAW_KEYWORD_RE = re.compile(
+    r"\b(?:"
+    r"bộ luật|bo luat|luật|luat|khoản|khoan|nghị định|nghi dinh|"
+    r"thông tư|thong tu|hiến pháp|hien phap|tội|hình sự|hinh su|"
+    r"dân sự|dan su|nghĩa vụ|nghia vu|trách nhiệm hình sự|"
+    r"trach nhiem hinh su|xử phạt|xu phat|vi phạm|vi pham|"
+    r"pháp luật|phap luat|hợp đồng|hop dong"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+_PASSAGE_MARKERS = ("đoạn thông tin:", "doan thong tin:")
 
 
 def _mostly_numeric_choices(choices: list[str]) -> bool:
@@ -62,3 +74,27 @@ def is_math_question(question: str, choices: list[str]) -> bool:
     if any(keyword in text for keyword in _DIRECT_MATH_KEYWORDS):
         return True
     return False
+
+
+def is_law_question(question: str, choices: list[str]) -> bool:
+    """Return True for questions likely answered by Vietnamese legal texts.
+
+    Precision over recall: legal RAG is only useful when the source corpus is
+    likely to contain the answer. Passage questions already include their own
+    evidence, and broad non-legal uses such as "quy luật" should stay direct.
+    """
+    question_text = question.casefold()
+    if any(marker in question_text for marker in _PASSAGE_MARKERS):
+        return False
+
+    text = "\n".join([question, *choices]).casefold()
+    if _LAW_ARTICLE_RE.search(text):
+        return True
+    match = _LAW_KEYWORD_RE.search(text)
+    if not match:
+        return False
+    if match.group(0) in {"luật", "luat"} and text[
+        max(0, match.start() - 4) : match.start()
+    ] == "quy ":
+        return False
+    return True

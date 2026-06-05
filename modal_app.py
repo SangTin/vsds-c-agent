@@ -156,6 +156,7 @@ def run_eval(
     legal_rag: bool = True,
     polysci_rag: bool = True,
     self_consistency: bool = True,
+    cot: bool = False,
 ) -> str:
     """Run the full 463-question public test; return pred.csv content."""
     import os
@@ -193,6 +194,8 @@ def run_eval(
     ]
     if self_consistency:
         cmd += ["--self-consistency"]
+    if cot:
+        cmd += ["--cot"]
     if legal_rag:
         cmd += [
             "--legal-rag", "--legal-device", "cuda",
@@ -221,12 +224,49 @@ def run_eval(
 
 @app.local_entrypoint()
 def main(rebuild_index: bool = False):
+    """v9: self-consistency only (3-prompt majority vote), no CoT."""
     from pathlib import Path
 
     assets = ensure_assets.remote(rebuild_index=rebuild_index)
     print("assets ready:", assets)
-    pred = run_eval.remote(legal_rag=True, polysci_rag=True)
+    pred = run_eval.remote(
+        legal_rag=True, polysci_rag=True, self_consistency=True, cot=False
+    )
     out = Path("../output/pred-v9-self-consistency.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
+def main_cot(rebuild_index: bool = False):
+    """v10: CoT-then-grammar (4-step reasoning), no self-consistency."""
+    from pathlib import Path
+
+    assets = ensure_assets.remote(rebuild_index=rebuild_index)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=True, polysci_rag=True, self_consistency=False, cot=True
+    )
+    out = Path("../output/pred-v10-cot.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
+def main_combined(rebuild_index: bool = False):
+    """v11: CoT + self-consistency combined (1 reasoning + 3 grammar extractions)."""
+    from pathlib import Path
+
+    assets = ensure_assets.remote(rebuild_index=rebuild_index)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=True, polysci_rag=True, self_consistency=True, cot=True
+    )
+    out = Path("../output/pred-v11-cot-sc.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(pred, encoding="utf-8")
     rows = pred.strip().count("\n")

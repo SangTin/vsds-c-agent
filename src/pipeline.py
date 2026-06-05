@@ -12,6 +12,20 @@ from src.router import is_law_question, is_math_question, is_polysci_question
 from src.schema import Prediction, Question
 
 
+def _select_mcq_method(
+    llm: LLMAnswerer,
+    self_consistency: bool,
+) -> Callable[..., str]:
+    use_cot = getattr(llm, "use_cot", False) is True
+    if use_cot and self_consistency:
+        return llm.answer_mcq_cot_self_consistent
+    if use_cot:
+        return llm.answer_mcq_cot
+    if self_consistency:
+        return llm.answer_mcq_self_consistent
+    return llm.answer_mcq
+
+
 def _direct_answer(
     q: Question,
     fallback_letter: str,
@@ -23,16 +37,8 @@ def _direct_answer(
         return Prediction(q.qid, fallback_letter)
 
     try:
-        if self_consistency:
-            self_consistent_answer = getattr(
-                llm,
-                "answer_mcq_self_consistent",
-                None,
-            )
-        else:
-            self_consistent_answer = None
-        if callable(self_consistent_answer):
-            answer = self_consistent_answer(
+        if self_consistency or getattr(llm, "use_cot", False) is True:
+            answer = _select_mcq_method(llm, self_consistency)(
                 q.question,
                 q.choices,
                 context=None,
@@ -128,26 +134,11 @@ def answer_question(
             )
             if legal_chunks and top_score >= legal_min_score:
                 context = _legal_context(legal_chunks)
-                if self_consistency:
-                    self_consistent_answer = getattr(
-                        llm,
-                        "answer_mcq_self_consistent",
-                        None,
-                    )
-                else:
-                    self_consistent_answer = None
-                if callable(self_consistent_answer):
-                    answer = self_consistent_answer(
-                        q.question,
-                        q.choices,
-                        context=context,
-                    )
-                else:
-                    answer = llm.answer_mcq(
-                        q.question,
-                        q.choices,
-                        context=context,
-                    )
+                answer = _select_mcq_method(llm, self_consistency)(
+                    q.question,
+                    q.choices,
+                    context=context,
+                )
                 validated = validate_letter(answer, len(q.choices), fallback_letter)
                 return Prediction(q.qid, validated)
         except Exception as exc:
@@ -176,26 +167,11 @@ def answer_question(
             )
             if polysci_chunks and top_score >= polysci_min_score:
                 context = _polysci_context(polysci_chunks)
-                if self_consistency:
-                    self_consistent_answer = getattr(
-                        llm,
-                        "answer_mcq_self_consistent",
-                        None,
-                    )
-                else:
-                    self_consistent_answer = None
-                if callable(self_consistent_answer):
-                    answer = self_consistent_answer(
-                        q.question,
-                        q.choices,
-                        context=context,
-                    )
-                else:
-                    answer = llm.answer_mcq(
-                        q.question,
-                        q.choices,
-                        context=context,
-                    )
+                answer = _select_mcq_method(llm, self_consistency)(
+                    q.question,
+                    q.choices,
+                    context=context,
+                )
                 validated = validate_letter(answer, len(q.choices), fallback_letter)
                 return Prediction(q.qid, validated)
         except Exception as exc:

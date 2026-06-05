@@ -11,6 +11,17 @@ _PROMPT_T2 = "Phân tích ngắn từng đáp án rồi chọn đúng 1 chữ c�
 _PROMPT_T3 = (
     "Hãy loại trừ các đáp án sai rõ ràng trước, rồi chọn đúng 1 chữ cái còn lại."
 )
+_COT_SYSTEM_PROMPT = (
+    "Bạn là một trợ lý làm bài trắc nghiệm tiếng Việt. "
+    "Hãy suy luận theo đúng 4 bước, ngắn gọn và tập trung:\n"
+    "Bước 1: Xác định câu hỏi đang hỏi gì (1 câu ngắn).\n"
+    "Bước 2: Đánh giá từng đáp án A, B, C, D... ngắn gọn (1 dòng/đáp án).\n"
+    "Bước 3: Loại bỏ phương án sai rõ, ghi nhận phương án còn khả thi.\n"
+    "Bước 4: Kết luận với cú pháp 'Đáp án cuối: <letter>'."
+)
+_COT_CLOSING_INSTRUCTION = (
+    "Hãy suy luận theo 4 bước trên rồi kết luận với cú pháp Đáp án cuối: <chữ cái>."
+)
 
 
 class LLMAnswerer:
@@ -22,7 +33,7 @@ class LLMAnswerer:
         seed: int = 42,
         verbose: bool = False,
         use_cot: bool = False,
-        cot_max_tokens: int = 200,
+        cot_max_tokens: int = 350,
     ) -> None:
         # Keep llama_cpp optional so non-inference commands and tests can still import.
         from llama_cpp import Llama, LlamaGrammar
@@ -183,7 +194,7 @@ class LLMAnswerer:
                 return letter
         return votes[0]
 
-    def answer_mcq_cot(
+    def _cot_reasoning(
         self,
         question: str,
         choices: list[str],
@@ -193,10 +204,7 @@ class LLMAnswerer:
         reasoning_messages = [
             {
                 "role": "system",
-                "content": (
-                    "Bạn là một trợ lý làm bài trắc nghiệm. Hãy suy luận ngắn gọn "
-                    "(tối đa 5 câu) rồi nêu đáp án cuối cùng."
-                ),
+                "content": _COT_SYSTEM_PROMPT,
             },
             {
                 "role": "user",
@@ -204,19 +212,27 @@ class LLMAnswerer:
                     question,
                     choices,
                     context,
-                    "Hãy suy luận ngắn gọn từng bước rồi kết luận đáp án bằng cú pháp "
-                    "'Đáp án cuối: <letter>'.",
+                    _COT_CLOSING_INSTRUCTION,
                     retrieved=retrieved,
                 ),
             },
         ]
-        reasoning = self.complete(
+        return self.complete(
             reasoning_messages,
             max_tokens=self.cot_max_tokens,
             temperature=0.0,
             seed=self.seed,
         )
 
+    def _extract_cot_answer(
+        self,
+        question: str,
+        choices: list[str],
+        reasoning: str,
+        context: str | None = None,
+        retrieved: list[dict[str, Any]] | None = None,
+        closing_instruction: str = "Dựa trên suy luận trên, trả lời bằng đúng 1 chữ cái.",
+    ) -> str:
         extraction_messages = [
             {
                 "role": "system",
@@ -233,7 +249,7 @@ class LLMAnswerer:
                         question,
                         choices,
                         context,
-                        "Dựa trên suy luận trên, trả lời bằng đúng 1 chữ cái.",
+                        closing_instruction,
                         retrieved=retrieved,
                     )
                 ),
@@ -254,6 +270,59 @@ class LLMAnswerer:
         if answer != content.strip().upper():
             raise ValueError(f"LLM returned invalid answer {content!r}")
         return answer
+
+    def answer_mcq_cot(
+        self,
+        question: str,
+        choices: list[str],
+        context: str | None = None,
+        retrieved: list[dict[str, Any]] | None = None,
+    ) -> str:
+        reasoning = self._cot_reasoning(
+            question,
+            choices,
+            context=context,
+            retrieved=retrieved,
+        )
+        return self._extract_cot_answer(
+            question,
+            choices,
+            reasoning,
+            context=context,
+            retrieved=retrieved,
+        )
+
+    def answer_mcq_cot_self_consistent(
+        self,
+        question: str,
+        choices: list[str],
+        context: str | None = None,
+        retrieved: list[dict[str, Any]] | None = None,
+    ) -> str:
+        reasoning = self._cot_reasoning(
+            question,
+            choices,
+            context=context,
+            retrieved=retrieved,
+        )
+        votes = [
+            self._extract_cot_answer(
+                question,
+                choices,
+                reasoning,
+                context=context,
+                retrieved=retrieved,
+                closing_instruction=instruction,
+            )
+            for instruction in (_PROMPT_T1, _PROMPT_T2, _PROMPT_T3)
+        ]
+        counts: dict[str, int] = {}
+        for letter in votes:
+            counts[letter] = counts.get(letter, 0) + 1
+        for letter, count in counts.items():
+            if count >= 2:
+                return letter
+        return votes[0]
 
     def answer(
         self,

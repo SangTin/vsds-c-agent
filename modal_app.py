@@ -21,8 +21,8 @@ MODEL_FILE = "Qwen3.5-9B-Q4_K_M.gguf"
 GPU = "A10G"  # 24GB — Qwen3.5-9B full offload; cheap on free credit
 
 image = (
-    modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
-    .apt_install("git", "build-essential", "cmake")
+    modal.Image.from_registry("nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04", add_python="3.11")
+    .apt_install("git")
     .pip_install("torch", index_url="https://download.pytorch.org/whl/cu124")
     .pip_install(
         "FlagEmbedding==1.2.10",
@@ -34,9 +34,11 @@ image = (
         "pyyaml",
         "huggingface_hub<1.0",
     )
-    .run_commands(
-        'CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=86" '
-        "pip install llama-cpp-python==0.3.* --no-cache-dir --no-binary llama-cpp-python"
+    # Prebuilt CUDA 12.4 wheel — no source build (avoids needing a C/C++ toolchain
+    # in the image); this wheel reports gpu_offload=True on the same model locally.
+    .pip_install(
+        "llama-cpp-python",
+        extra_index_url="https://abetlen.github.io/llama-cpp-python/whl/cu124",
     )
     # Ship the repo code into the image (latest local state).
     .add_local_dir(".", "/app", ignore=["data_kb", "models", ".venv*", ".git", "results"])

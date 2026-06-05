@@ -7,3 +7,7 @@ tqdm>=4.66
 # These two are also needed at runtime when RAG is enabled.
 FlagEmbedding>=1.2
 faiss-cpu>=1.8
+
+# Targeted-corpus ingestion (build_targeted_corpus.py): PDF + HTML parsing.
+pypdf>=4.0
+beautifulsoup4>=4.12

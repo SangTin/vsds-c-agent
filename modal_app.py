@@ -151,7 +151,7 @@ def ensure_assets(rebuild_index: bool = False) -> dict:
     }
 
 
-@app.function(image=image, gpu=GPU, volumes={CACHE: cache}, timeout=3600)
+@app.function(image=image, gpu=GPU, volumes={CACHE: cache}, timeout=14400)
 def run_eval(
     legal_rag: bool = True,
     polysci_rag: bool = True,

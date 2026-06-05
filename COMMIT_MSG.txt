@@ -1,1 +1,0 @@
-feat(rag): polysci-domain RAG pilot (5-subject Marxist-Leninist corpus, mirror of legal-RAG)

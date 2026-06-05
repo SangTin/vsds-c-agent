@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +90,24 @@ class LLMAnswerer:
             f"{closing_instruction}"
         )
 
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+        temperature: float = 0.0,
+        seed: int | None = None,
+        **kwargs: Any,
+    ) -> str:
+        completion = self.llm.create_chat_completion(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            seed=self.seed if seed is None else seed,
+            **kwargs,
+        )
+        content = completion["choices"][0]["message"]["content"]
+        return content if isinstance(content, str) else ""
+
     def answer_mcq(
         self,
         question: str,
@@ -157,14 +177,12 @@ class LLMAnswerer:
                 ),
             },
         ]
-        reasoning_completion = self.llm.create_chat_completion(
-            messages=reasoning_messages,
-            temperature=0.0,
+        reasoning = self.complete(
+            reasoning_messages,
             max_tokens=self.cot_max_tokens,
+            temperature=0.0,
             seed=self.seed,
         )
-        reasoning_content = reasoning_completion["choices"][0]["message"]["content"]
-        reasoning = reasoning_content if isinstance(reasoning_content, str) else ""
 
         extraction_messages = [
             {

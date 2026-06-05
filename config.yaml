@@ -6,6 +6,8 @@ model:
   seed: 42
   use_cot: false
   cot_max_tokens: 200
+  use_tools: false
+  tool_timeout: 5.0
 
 # Reserved for Milestone 3 routing settings.
 router:

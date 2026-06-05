@@ -100,4 +100,27 @@ Expected evaluation time is about 25-30 minutes for 463 questions. Configure
 RAG with `rag.enabled`, `rag.top_k`, and `rag.device` in `config.yaml`, or use
 the corresponding CLI flags.
 
-Baselines: **v1 = 66.52%**, **v2 = abandoned (17x slow)**, **v3 = TBD**.
+Baselines: **v1 = 66.52%**, **v2 = abandoned (17x slow)**, **v3 = dropped**.
+See [docs/rag-experiment.md](docs/rag-experiment.md) for the negative-result
+writeup and the RAG-to-tools pivot.
+
+## v4 — Tools (Program-of-Thought)
+
+v4 adds an optional Program-of-Thought path for calculation-heavy questions.
+The router sends only likely math/quantity questions into this path: LaTeX math,
+arithmetic/calculus/economics keywords, units/percent/currency signals, or
+mostly numeric choices. Non-math questions continue through the v1 direct MCQ
+path.
+
+Enable tools with `--tools`, disable a configured tool run with `--no-tools`,
+or set `model.use_tools: true` in `config.yaml`. `--tool-timeout` and
+`model.tool_timeout` control the per-snippet subprocess timeout and default to
+`5.0` seconds.
+
+When tools are enabled, Qwen first writes a short fenced Python snippet that
+prints the final computed value. The snippet runs in an isolated subprocess with
+`math`, `sympy`, `itertools`, `fractions`, `decimal`, and `statistics` available.
+If the code raises or prints nothing, the error is fed back once and the model
+gets one repair attempt. The printed result is then given back to the grammar
+constrained MCQ selector. Any tool failure falls back to the normal v1 answer
+path, so tools never break batch output.

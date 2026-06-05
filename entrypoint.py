@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import argparse
 import sys
 import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -11,6 +14,7 @@ from src.loader import load_questions
 from src.pipeline import answer_question
 from src.rag.embedder import BGEEmbedder
 from src.rag.retriever import FaissRetriever
+from src.router import is_math_question
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
@@ -21,6 +25,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "seed": 42,
         "use_cot": False,
         "cot_max_tokens": 200,
+        "use_tools": False,
+        "tool_timeout": 5.0,
     },
     "rag": {
         "enabled": False,
@@ -54,6 +60,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cot", action="store_true", default=None)
     parser.add_argument("--no-cot", action="store_false", dest="cot")
     parser.add_argument("--cot-max-tokens", type=int, default=None)
+    parser.add_argument("--tools", action="store_true", default=None)
+    parser.add_argument("--no-tools", action="store_false", dest="tools")
+    parser.add_argument(
+        "--tool-timeout",
+        type=float,
+        default=model_config["tool_timeout"],
+    )
     parser.add_argument("--rag", action="store_true", default=None)
     parser.add_argument("--no-rag", action="store_false", dest="rag")
     parser.add_argument("--rag-index", type=Path, default=None)
@@ -96,6 +109,8 @@ def load_config(path: Path) -> dict[str, Any]:
     seed = model.get("seed", model_defaults["seed"])
     use_cot = model.get("use_cot", model_defaults["use_cot"])
     cot_max_tokens = model.get("cot_max_tokens", model_defaults["cot_max_tokens"])
+    use_tools = model.get("use_tools", model_defaults["use_tools"])
+    tool_timeout = model.get("tool_timeout", model_defaults["tool_timeout"])
     fallback = output.get("fallback_answer", output_defaults["fallback_answer"])
     rag_enabled = rag.get("enabled", rag_defaults["enabled"])
     index_path = rag.get("index_path", rag_defaults["index_path"])
@@ -115,6 +130,10 @@ def load_config(path: Path) -> dict[str, Any]:
         use_cot = model_defaults["use_cot"]
     if not isinstance(cot_max_tokens, int):
         cot_max_tokens = model_defaults["cot_max_tokens"]
+    if not isinstance(use_tools, bool):
+        use_tools = model_defaults["use_tools"]
+    if not isinstance(tool_timeout, (int, float)) or tool_timeout <= 0:
+        tool_timeout = model_defaults["tool_timeout"]
     if not isinstance(fallback, str):
         fallback = output_defaults["fallback_answer"]
     if not isinstance(rag_enabled, bool):
@@ -138,6 +157,8 @@ def load_config(path: Path) -> dict[str, Any]:
             "seed": seed,
             "use_cot": use_cot,
             "cot_max_tokens": cot_max_tokens,
+            "use_tools": use_tools,
+            "tool_timeout": float(tool_timeout),
         },
         "rag": {
             "enabled": rag_enabled,
@@ -163,6 +184,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.cot_max_tokens is None
             else args.cot_max_tokens
         )
+        use_tools = config["model"]["use_tools"] if args.tools is None else args.tools
+        tool_timeout = args.tool_timeout
         rag_enabled = config["rag"]["enabled"] if args.rag is None else args.rag
         rag_index = args.rag_index or Path(config["rag"]["index_path"])
         rag_metadata = args.rag_metadata or Path(config["rag"]["metadata_path"])
@@ -181,6 +204,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"seed: {args.seed}")
             print(f"use_cot: {use_cot}")
             print(f"cot_max_tokens: {cot_max_tokens}")
+            print(f"use_tools: {use_tools}")
+            print(f"tool_timeout: {tool_timeout}")
             print(f"RAG requested: {rag_enabled}")
             print(f"RAG top_k: {rag_top_k}")
             print(f"RAG index path: {rag_index}")
@@ -241,11 +266,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.verbose:
             print(f"RAG enabled: {retriever is not None}")
 
+        tool_runner: Callable[[str], dict[str, Any]] | None = None
+        if use_tools:
+            from src.tools.sandbox import run_python
+
+            tool_runner = lambda code: run_python(code, timeout=tool_timeout)
+
         fallback = config["output"]["fallback_answer"]
-        predictions = [
-            answer_question(question, fallback, llm, retriever)
-            for question in questions
-        ]
+        predictions = []
+        for question in questions:
+            if (
+                args.verbose
+                and use_tools
+                and llm is not None
+                and is_math_question(question.question, question.choices)
+            ):
+                print(f"Tool path: {question.qid}", file=sys.stderr)
+            predictions.append(
+                answer_question(
+                    question,
+                    fallback,
+                    llm,
+                    retriever,
+                    use_tools=use_tools,
+                    run_python=tool_runner,
+                )
+            )
         output_path = args.output_dir / "pred.csv"
         write_predictions(predictions, output_path)
 

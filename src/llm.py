@@ -6,6 +6,13 @@ from typing import Any
 from src.extract import letter_set, validate_letter
 
 
+_PROMPT_T1 = "Trả lời bằng đúng 1 chữ cái."
+_PROMPT_T2 = "Phân tích ngắn từng đáp án rồi chọn đúng 1 chữ cái."
+_PROMPT_T3 = (
+    "Hãy loại trừ các đáp án sai rõ ràng trước, rồi chọn đúng 1 chữ cái còn lại."
+)
+
+
 class LLMAnswerer:
     def __init__(
         self,
@@ -114,6 +121,7 @@ class LLMAnswerer:
         choices: list[str],
         context: str | None = None,
         retrieved: list[dict[str, Any]] | None = None,
+        closing_instruction: str = _PROMPT_T1,
     ) -> str:
         messages = [
             {
@@ -129,7 +137,7 @@ class LLMAnswerer:
                     question,
                     choices,
                     context,
-                    "Trả lời bằng đúng 1 chữ cái.",
+                    closing_instruction,
                     retrieved=retrieved,
                 ),
             },
@@ -149,6 +157,31 @@ class LLMAnswerer:
         if answer != content.strip().upper():
             raise ValueError(f"LLM returned invalid answer {content!r}")
         return answer
+
+    def answer_mcq_self_consistent(
+        self,
+        question: str,
+        choices: list[str],
+        context: str | None = None,
+        retrieved: list[dict[str, Any]] | None = None,
+    ) -> str:
+        votes = [
+            self.answer_mcq(
+                question,
+                choices,
+                context=context,
+                retrieved=retrieved,
+                closing_instruction=instruction,
+            )
+            for instruction in (_PROMPT_T1, _PROMPT_T2, _PROMPT_T3)
+        ]
+        counts: dict[str, int] = {}
+        for letter in votes:
+            counts[letter] = counts.get(letter, 0) + 1
+        for letter, count in counts.items():
+            if count >= 2:
+                return letter
+        return votes[0]
 
     def answer_mcq_cot(
         self,

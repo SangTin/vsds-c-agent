@@ -18,6 +18,8 @@ from __future__ import annotations
 import modal
 
 MODEL_REPO = "unsloth/Qwen3.5-9B-GGUF"
+# Q4_K_M is the canonical submission quant — empirically tested Q5_K_M ≈ Q4 on this MCQ
+# set (Δ proxy = -0.65pp), so stay on Q4 for smaller image and matched-Docker reproducibility.
 MODEL_FILE = "Qwen3.5-9B-Q4_K_M.gguf"
 GPU = "A10G"  # 24GB — Qwen3.5-9B full offload; cheap on free credit
 
@@ -150,7 +152,11 @@ def ensure_assets(rebuild_index: bool = False) -> dict:
 
 
 @app.function(image=image, gpu=GPU, volumes={CACHE: cache}, timeout=3600)
-def run_eval(legal_rag: bool = True, polysci_rag: bool = True) -> str:
+def run_eval(
+    legal_rag: bool = True,
+    polysci_rag: bool = True,
+    self_consistency: bool = True,
+) -> str:
     """Run the full 463-question public test; return pred.csv content."""
     import os
     import subprocess
@@ -185,6 +191,8 @@ def run_eval(legal_rag: bool = True, polysci_rag: bool = True) -> str:
         "--model-path", model_path, "--n-gpu-layers", "99",
         "--tools", "--verbose",
     ]
+    if self_consistency:
+        cmd += ["--self-consistency"]
     if legal_rag:
         cmd += [
             "--legal-rag", "--legal-device", "cuda",
@@ -218,7 +226,7 @@ def main(rebuild_index: bool = False):
     assets = ensure_assets.remote(rebuild_index=rebuild_index)
     print("assets ready:", assets)
     pred = run_eval.remote(legal_rag=True, polysci_rag=True)
-    out = Path("../output/pred-v7-law-polysci-rag-qwen35.csv")
+    out = Path("../output/pred-v9-self-consistency.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(pred, encoding="utf-8")
     rows = pred.strip().count("\n")

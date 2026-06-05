@@ -56,6 +56,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "device": "cpu",
         "model_name": "BAAI/bge-m3",
     },
+    "self_consistency": {"enabled": False},
     "output": {"fallback_answer": "A"},
 }
 
@@ -154,6 +155,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         choices=("cpu", "cuda"),
         default=polysci_rag_config["device"],
     )
+    parser.add_argument("--self-consistency", action="store_true", default=None)
+    parser.add_argument(
+        "--no-self-consistency",
+        action="store_false",
+        dest="self_consistency",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
 
@@ -175,11 +182,13 @@ def load_config(path: Path) -> dict[str, Any]:
     rag = loaded.get("rag")
     legal_rag = loaded.get("legal_rag")
     polysci_rag = loaded.get("polysci_rag")
+    self_consistency = loaded.get("self_consistency")
     output = loaded.get("output")
     model_defaults = DEFAULT_CONFIG["model"]
     rag_defaults = DEFAULT_CONFIG["rag"]
     legal_rag_defaults = DEFAULT_CONFIG["legal_rag"]
     polysci_rag_defaults = DEFAULT_CONFIG["polysci_rag"]
+    self_consistency_defaults = DEFAULT_CONFIG["self_consistency"]
     output_defaults = DEFAULT_CONFIG["output"]
     if not isinstance(model, dict):
         model = {}
@@ -191,6 +200,8 @@ def load_config(path: Path) -> dict[str, Any]:
         legal_rag = {}
     if not isinstance(polysci_rag, dict):
         polysci_rag = {}
+    if not isinstance(self_consistency, dict):
+        self_consistency = {}
 
     path = model.get("path", model_defaults["path"])
     n_gpu_layers = model.get("n_gpu_layers", model_defaults["n_gpu_layers"])
@@ -244,6 +255,10 @@ def load_config(path: Path) -> dict[str, Any]:
     polysci_model_name = polysci_rag.get(
         "model_name",
         polysci_rag_defaults["model_name"],
+    )
+    self_consistency_enabled = self_consistency.get(
+        "enabled",
+        self_consistency_defaults["enabled"],
     )
     if not isinstance(path, str):
         path = model_defaults["path"]
@@ -303,6 +318,8 @@ def load_config(path: Path) -> dict[str, Any]:
         polysci_device = polysci_rag_defaults["device"]
     if not isinstance(polysci_model_name, str):
         polysci_model_name = polysci_rag_defaults["model_name"]
+    if not isinstance(self_consistency_enabled, bool):
+        self_consistency_enabled = self_consistency_defaults["enabled"]
 
     return {
         "model": {
@@ -341,6 +358,7 @@ def load_config(path: Path) -> dict[str, Any]:
             "device": polysci_device,
             "model_name": polysci_model_name,
         },
+        "self_consistency": {"enabled": self_consistency_enabled},
         "output": {"fallback_answer": fallback},
     }
 
@@ -390,6 +408,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         polysci_min_score = args.polysci_min_score
         polysci_device = args.polysci_device
         polysci_model_name = config["polysci_rag"]["model_name"]
+        self_consistency_enabled = (
+            args.self_consistency
+            if args.self_consistency is not None
+            else config["self_consistency"]["enabled"]
+        )
         input_path = discover_input(args.data_dir)
         if args.verbose:
             print(f"Input: {input_path}")
@@ -416,6 +439,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Polysci RAG min_score: {polysci_min_score}")
             print(f"Polysci RAG index path: {polysci_index}")
             print(f"Polysci RAG embedder device: {polysci_device}")
+            print(f"Self-consistency enabled: {self_consistency_enabled}")
 
         questions = load_questions(input_path)
         print(f"Questions read: {len(questions)}")
@@ -558,6 +582,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     legal_min_score=legal_min_score,
                     polysci_retriever=polysci_retriever,
                     polysci_min_score=polysci_min_score,
+                    self_consistency=self_consistency_enabled,
                 )
             )
         output_path = args.output_dir / "pred.csv"

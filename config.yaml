@@ -37,5 +37,8 @@ polysci_rag:
   device: cpu
   model_name: BAAI/bge-m3
 
+self_consistency:
+  enabled: false
+
 output:
   fallback_answer: "A"

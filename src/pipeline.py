@@ -17,12 +17,29 @@ def _direct_answer(
     fallback_letter: str,
     llm: LLMAnswerer | None,
     retrieved: list[dict[str, Any]] | None = None,
+    self_consistency: bool = False,
 ) -> Prediction:
     if llm is None:
         return Prediction(q.qid, fallback_letter)
 
     try:
-        answer = llm.answer(q.question, q.choices, retrieved=retrieved)
+        if self_consistency:
+            self_consistent_answer = getattr(
+                llm,
+                "answer_mcq_self_consistent",
+                None,
+            )
+        else:
+            self_consistent_answer = None
+        if callable(self_consistent_answer):
+            answer = self_consistent_answer(
+                q.question,
+                q.choices,
+                context=None,
+                retrieved=retrieved,
+            )
+        else:
+            answer = llm.answer(q.question, q.choices, retrieved=retrieved)
         validated = validate_letter(answer, len(q.choices), fallback_letter)
         return Prediction(q.qid, validated)
     except Exception as exc:
@@ -76,6 +93,7 @@ def answer_question(
     legal_min_score: float = 0.0,
     polysci_retriever: FaissRetriever | None = None,
     polysci_min_score: float = 0.0,
+    self_consistency: bool = False,
 ) -> Prediction:
     """Answer one question with the LLM, falling back without breaking the batch."""
     fallback_letter = validate_letter(fallback, len(q.choices))
@@ -109,11 +127,27 @@ def answer_question(
                 float(legal_chunks[0].get("score", 0.0)) if legal_chunks else 0.0
             )
             if legal_chunks and top_score >= legal_min_score:
-                answer = llm.answer_mcq(
-                    q.question,
-                    q.choices,
-                    context=_legal_context(legal_chunks),
-                )
+                context = _legal_context(legal_chunks)
+                if self_consistency:
+                    self_consistent_answer = getattr(
+                        llm,
+                        "answer_mcq_self_consistent",
+                        None,
+                    )
+                else:
+                    self_consistent_answer = None
+                if callable(self_consistent_answer):
+                    answer = self_consistent_answer(
+                        q.question,
+                        q.choices,
+                        context=context,
+                    )
+                else:
+                    answer = llm.answer_mcq(
+                        q.question,
+                        q.choices,
+                        context=context,
+                    )
                 validated = validate_letter(answer, len(q.choices), fallback_letter)
                 return Prediction(q.qid, validated)
         except Exception as exc:
@@ -122,7 +156,12 @@ def answer_question(
                 f"falling back to direct answer: {exc}",
                 file=sys.stderr,
             )
-        return _direct_answer(q, fallback_letter, llm)
+        return _direct_answer(
+            q,
+            fallback_letter,
+            llm,
+            self_consistency=self_consistency,
+        )
 
     if llm is not None and polysci_retriever is not None and is_polysci_question(
         q.question,
@@ -136,11 +175,27 @@ def answer_question(
                 else 0.0
             )
             if polysci_chunks and top_score >= polysci_min_score:
-                answer = llm.answer_mcq(
-                    q.question,
-                    q.choices,
-                    context=_polysci_context(polysci_chunks),
-                )
+                context = _polysci_context(polysci_chunks)
+                if self_consistency:
+                    self_consistent_answer = getattr(
+                        llm,
+                        "answer_mcq_self_consistent",
+                        None,
+                    )
+                else:
+                    self_consistent_answer = None
+                if callable(self_consistent_answer):
+                    answer = self_consistent_answer(
+                        q.question,
+                        q.choices,
+                        context=context,
+                    )
+                else:
+                    answer = llm.answer_mcq(
+                        q.question,
+                        q.choices,
+                        context=context,
+                    )
                 validated = validate_letter(answer, len(q.choices), fallback_letter)
                 return Prediction(q.qid, validated)
         except Exception as exc:
@@ -149,7 +204,12 @@ def answer_question(
                 f"falling back to direct answer: {exc}",
                 file=sys.stderr,
             )
-        return _direct_answer(q, fallback_letter, llm)
+        return _direct_answer(
+            q,
+            fallback_letter,
+            llm,
+            self_consistency=self_consistency,
+        )
 
     retrieved: list[dict[str, Any]] | None = None
     should_retrieve = retriever is not None and "Đoạn thông tin:" not in q.question
@@ -163,4 +223,10 @@ def answer_question(
                 file=sys.stderr,
             )
 
-    return _direct_answer(q, fallback_letter, llm, retrieved=retrieved)
+    return _direct_answer(
+        q,
+        fallback_letter,
+        llm,
+        retrieved=retrieved,
+        self_consistency=self_consistency,
+    )

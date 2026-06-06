@@ -4,7 +4,7 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
-from src.agent.loop import solve_with_tools
+from src.agent.loop import solve_with_tools, solve_with_tools_ranking
 from src.extract import validate_letter
 from src.llm import LLMAnswerer
 from src.rag.retriever import FaissRetriever
@@ -100,6 +100,7 @@ def answer_question(
     polysci_retriever: FaissRetriever | None = None,
     polysci_min_score: float = 0.0,
     self_consistency: bool = False,
+    use_pot_ranking: bool = False,
 ) -> Prediction:
     """Answer one question with the LLM, falling back without breaking the batch."""
     fallback_letter = validate_letter(fallback, len(q.choices))
@@ -110,6 +111,27 @@ def answer_question(
         and is_math_question(q.question, q.choices)
     ):
         try:
+            if use_pot_ranking:
+                letter = solve_with_tools_ranking(
+                    llm,
+                    q.question,
+                    q.choices,
+                    run_python=run_python,
+                )
+                if letter:
+                    normalized_letter = letter.strip().upper()
+                    validated_letter = validate_letter(
+                        normalized_letter,
+                        len(q.choices),
+                        fallback="",
+                    )
+                    if validated_letter != normalized_letter:
+                        letter = None
+                if letter:
+                    return Prediction(
+                        q.qid,
+                        normalized_letter,
+                    )
             letter = solve_with_tools(llm, q.question, q.choices, run_python)
             if letter:
                 return Prediction(

@@ -26,6 +26,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "n_ctx": 8192,
         "seed": 42,
         "use_cot": False,
+        "use_pot_ranking": False,
         "cot_max_tokens": 200,
         "use_tools": False,
         "tool_timeout": 5.0,
@@ -91,6 +92,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=model_config["seed"])
     parser.add_argument("--cot", action="store_true", default=None)
     parser.add_argument("--no-cot", action="store_false", dest="cot")
+    parser.add_argument("--pot-ranking", action="store_true", default=None)
+    parser.add_argument("--no-pot-ranking", action="store_false", dest="pot_ranking")
     parser.add_argument("--cot-max-tokens", type=int, default=None)
     parser.add_argument("--tools", action="store_true", default=None)
     parser.add_argument("--no-tools", action="store_false", dest="tools")
@@ -208,6 +211,10 @@ def load_config(path: Path) -> dict[str, Any]:
     n_ctx = model.get("n_ctx", model_defaults["n_ctx"])
     seed = model.get("seed", model_defaults["seed"])
     use_cot = model.get("use_cot", model_defaults["use_cot"])
+    use_pot_ranking = model.get(
+        "use_pot_ranking",
+        model_defaults["use_pot_ranking"],
+    )
     cot_max_tokens = model.get("cot_max_tokens", model_defaults["cot_max_tokens"])
     use_tools = model.get("use_tools", model_defaults["use_tools"])
     tool_timeout = model.get("tool_timeout", model_defaults["tool_timeout"])
@@ -270,6 +277,8 @@ def load_config(path: Path) -> dict[str, Any]:
         seed = model_defaults["seed"]
     if not isinstance(use_cot, bool):
         use_cot = model_defaults["use_cot"]
+    if not isinstance(use_pot_ranking, bool):
+        use_pot_ranking = model_defaults["use_pot_ranking"]
     if not isinstance(cot_max_tokens, int):
         cot_max_tokens = model_defaults["cot_max_tokens"]
     if not isinstance(use_tools, bool):
@@ -328,6 +337,7 @@ def load_config(path: Path) -> dict[str, Any]:
             "n_ctx": n_ctx,
             "seed": seed,
             "use_cot": use_cot,
+            "use_pot_ranking": use_pot_ranking,
             "cot_max_tokens": cot_max_tokens,
             "use_tools": use_tools,
             "tool_timeout": float(tool_timeout),
@@ -370,6 +380,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = load_config(args.config)
         model_path = args.model_path or Path(config["model"]["path"])
         use_cot = config["model"]["use_cot"] if args.cot is None else args.cot
+        use_pot_ranking = (
+            args.pot_ranking
+            if args.pot_ranking is not None
+            else config["model"]["use_pot_ranking"]
+        )
         cot_max_tokens = (
             config["model"]["cot_max_tokens"]
             if args.cot_max_tokens is None
@@ -422,6 +437,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"n_ctx: {args.n_ctx}")
             print(f"seed: {args.seed}")
             print(f"use_cot: {use_cot}")
+            print(f"use_pot_ranking: {use_pot_ranking}")
             print(f"cot_max_tokens: {cot_max_tokens}")
             print(f"use_tools: {use_tools}")
             print(f"tool_timeout: {tool_timeout}")
@@ -583,6 +599,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     polysci_retriever=polysci_retriever,
                     polysci_min_score=polysci_min_score,
                     self_consistency=self_consistency_enabled,
+                    use_pot_ranking=use_pot_ranking,
                 )
             )
         output_path = args.output_dir / "pred.csv"

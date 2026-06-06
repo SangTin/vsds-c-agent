@@ -157,6 +157,7 @@ def run_eval(
     polysci_rag: bool = True,
     self_consistency: bool = True,
     cot: bool = False,
+    pot_ranking: bool = False,
     cot_max_tokens: int | None = None,
 ) -> str:
     """Run the full 463-question public test; return pred.csv content."""
@@ -197,6 +198,8 @@ def run_eval(
         cmd += ["--self-consistency"]
     if cot:
         cmd += ["--cot"]
+    if pot_ranking:
+        cmd += ["--pot-ranking"]
     if cot_max_tokens is not None:
         cmd += ["--cot-max-tokens", str(cot_max_tokens)]
     if legal_rag:
@@ -274,6 +277,27 @@ def main_cot_long(rebuild_index: bool = False):
         cot_max_tokens=600,
     )
     out = Path("../output/pred-v13-cot-long.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
+def main_pot_ranking(rebuild_index: bool = False):
+    """v16: v10 baseline + PoT answer-ranking for math."""
+    from pathlib import Path
+
+    assets = ensure_assets.remote(rebuild_index=rebuild_index)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=True,
+        polysci_rag=True,
+        self_consistency=False,
+        cot=True,
+        pot_ranking=True,
+    )
+    out = Path("../output/pred-v16-pot-ranking.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(pred, encoding="utf-8")
     rows = pred.strip().count("\n")

@@ -5,6 +5,7 @@ model:
   n_ctx: 8192
   seed: 42
   use_cot: false
+  use_pot_ranking: false
   cot_max_tokens: 200
   use_tools: false
   tool_timeout: 5.0

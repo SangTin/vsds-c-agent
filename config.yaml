@@ -9,6 +9,7 @@ model:
   cot_max_tokens: 200
   use_cot_passage: false
   cot_passage_max_chars: 3500
+  use_self_verify: false
   use_tools: false
   tool_timeout: 5.0
 

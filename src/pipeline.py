@@ -62,6 +62,42 @@ def _select_mcq_method_for_question(
     return _select_non_cot_mcq_method(llm, self_consistency)
 
 
+def _maybe_verify_letter(
+    q: Question,
+    fallback_letter: str,
+    llm: LLMAnswerer,
+    answer: str,
+    use_self_verify: bool,
+    self_consistency: bool,
+    context: str | None = None,
+    retrieved: list[dict[str, Any]] | None = None,
+) -> str:
+    validated = validate_letter(answer, len(q.choices), fallback_letter)
+    if not use_self_verify or self_consistency:
+        return validated
+
+    verify_letter = getattr(llm, "verify_letter", None)
+    if not callable(verify_letter):
+        return validated
+
+    try:
+        final = verify_letter(
+            q.question,
+            q.choices,
+            validated,
+            context=context,
+            retrieved=retrieved,
+        )
+        return validate_letter(final, len(q.choices), fallback=validated)
+    except Exception as exc:
+        print(
+            f"Warning: self-verification failed for {q.qid!r}; "
+            f"keeping first-pass answer {validated}: {exc}",
+            file=sys.stderr,
+        )
+        return validated
+
+
 def _direct_answer(
     q: Question,
     fallback_letter: str,
@@ -70,12 +106,17 @@ def _direct_answer(
     self_consistency: bool = False,
     use_cot_passage: bool = False,
     cot_passage_max_chars: int = 3500,
+    use_self_verify: bool = False,
 ) -> Prediction:
     if llm is None:
         return Prediction(q.qid, fallback_letter)
 
     try:
-        if self_consistency or getattr(llm, "use_cot", False) is True:
+        if (
+            self_consistency
+            or getattr(llm, "use_cot", False) is True
+            or use_self_verify
+        ):
             answer = _select_mcq_method_for_question(
                 llm,
                 self_consistency,
@@ -90,7 +131,15 @@ def _direct_answer(
             )
         else:
             answer = llm.answer(q.question, q.choices, retrieved=retrieved)
-        validated = validate_letter(answer, len(q.choices), fallback_letter)
+        validated = _maybe_verify_letter(
+            q,
+            fallback_letter,
+            llm,
+            answer,
+            use_self_verify,
+            self_consistency,
+            retrieved=retrieved,
+        )
         return Prediction(q.qid, validated)
     except Exception as exc:
         print(
@@ -147,6 +196,7 @@ def answer_question(
     use_pot_ranking: bool = False,
     use_cot_passage: bool = False,
     cot_passage_max_chars: int = 3500,
+    use_self_verify: bool = False,
 ) -> Prediction:
     """Answer one question with the LLM, falling back without breaking the batch."""
     fallback_letter = validate_letter(fallback, len(q.choices))
@@ -213,7 +263,15 @@ def answer_question(
                     q.choices,
                     context=context,
                 )
-                validated = validate_letter(answer, len(q.choices), fallback_letter)
+                validated = _maybe_verify_letter(
+                    q,
+                    fallback_letter,
+                    llm,
+                    answer,
+                    use_self_verify,
+                    self_consistency,
+                    context=context,
+                )
                 return Prediction(q.qid, validated)
         except Exception as exc:
             print(
@@ -228,6 +286,7 @@ def answer_question(
             self_consistency=self_consistency,
             use_cot_passage=use_cot_passage,
             cot_passage_max_chars=cot_passage_max_chars,
+            use_self_verify=use_self_verify,
         )
 
     if llm is not None and polysci_retriever is not None and is_polysci_question(
@@ -254,7 +313,15 @@ def answer_question(
                     q.choices,
                     context=context,
                 )
-                validated = validate_letter(answer, len(q.choices), fallback_letter)
+                validated = _maybe_verify_letter(
+                    q,
+                    fallback_letter,
+                    llm,
+                    answer,
+                    use_self_verify,
+                    self_consistency,
+                    context=context,
+                )
                 return Prediction(q.qid, validated)
         except Exception as exc:
             print(
@@ -269,6 +336,7 @@ def answer_question(
             self_consistency=self_consistency,
             use_cot_passage=use_cot_passage,
             cot_passage_max_chars=cot_passage_max_chars,
+            use_self_verify=use_self_verify,
         )
 
     retrieved: list[dict[str, Any]] | None = None
@@ -291,4 +359,5 @@ def answer_question(
         self_consistency=self_consistency,
         use_cot_passage=use_cot_passage,
         cot_passage_max_chars=cot_passage_max_chars,
+        use_self_verify=use_self_verify,
     )

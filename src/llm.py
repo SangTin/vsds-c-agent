@@ -22,6 +22,19 @@ _COT_SYSTEM_PROMPT = (
 _COT_CLOSING_INSTRUCTION = (
     "Hãy suy luận theo 4 bước trên rồi kết luận với cú pháp Đáp án cuối: <chữ cái>."
 )
+_VERIFY_SYSTEM_PROMPT = (
+    "Bạn là trợ lý xác minh đáp án trắc nghiệm. Hãy đánh giá lại lựa chọn vừa "
+    "đưa ra, so sánh nó với các phương án khác, rồi chỉ trả lời bằng đúng 1 chữ "
+    "cái — chữ cái mà bạn tin là đáp án đúng nhất sau khi cân nhắc kỹ."
+)
+_VERIFY_USER_TEMPLATE = (
+    "Câu hỏi:\n{question}\n\n"
+    "Lựa chọn:\n{choices_text}\n\n"
+    "Đáp án đã chọn: {chosen_letter}\n\n"
+    "Hãy kiểm tra lại bằng cách so sánh {chosen_letter} với từng phương án còn lại. "
+    "Nếu {chosen_letter} vẫn đúng nhất, trả lời {chosen_letter}. Nếu không, chọn đáp án "
+    "khác. Chỉ trả lời 1 chữ cái."
+)
 
 
 class LLMAnswerer:
@@ -167,6 +180,44 @@ class LLMAnswerer:
         answer = validate_letter(content, len(choices))
         if answer != content.strip().upper():
             raise ValueError(f"LLM returned invalid answer {content!r}")
+        return answer
+
+    def verify_letter(
+        self,
+        question: str,
+        choices: list[str],
+        chosen_letter: str,
+        context: str | None = None,
+        retrieved: list[dict[str, Any]] | None = None,
+    ) -> str:
+        chosen = validate_letter(chosen_letter, len(choices))
+        prompt = _VERIFY_USER_TEMPLATE.format(
+            question=question,
+            choices_text=self._choice_lines(choices),
+            chosen_letter=chosen,
+        )
+        if context:
+            prompt += f"\n\nNgữ cảnh:\n{context}"
+        if retrieved:
+            prompt += f"\n\n{self._retrieved_context(retrieved).rstrip()}"
+        messages = [
+            {"role": "system", "content": _VERIFY_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ]
+        completion = self.llm.create_chat_completion(
+            messages=messages,
+            grammar=self.grammar_for(len(choices)),
+            temperature=0.0,
+            max_tokens=2,
+            seed=self.seed,
+        )
+        content = completion["choices"][0]["message"]["content"]
+        if not isinstance(content, str) or not content.strip():
+            return chosen
+
+        answer = validate_letter(content, len(choices), fallback=chosen)
+        if answer != content.strip().upper():
+            return chosen
         return answer
 
     def answer_mcq_self_consistent(

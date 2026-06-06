@@ -30,6 +30,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cot_max_tokens": 200,
         "use_cot_passage": False,
         "cot_passage_max_chars": 3500,
+        "use_self_verify": False,
         "use_tools": False,
         "tool_timeout": 5.0,
     },
@@ -100,6 +101,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cot-passage", action="store_true", default=None)
     parser.add_argument("--no-cot-passage", action="store_false", dest="cot_passage")
     parser.add_argument("--cot-passage-max-chars", type=int, default=None)
+    parser.add_argument("--self-verify", action="store_true", default=None)
+    parser.add_argument(
+        "--no-self-verify",
+        action="store_false",
+        dest="self_verify",
+    )
     parser.add_argument("--tools", action="store_true", default=None)
     parser.add_argument("--no-tools", action="store_false", dest="tools")
     parser.add_argument(
@@ -229,6 +236,10 @@ def load_config(path: Path) -> dict[str, Any]:
         "cot_passage_max_chars",
         model_defaults["cot_passage_max_chars"],
     )
+    use_self_verify = model.get(
+        "use_self_verify",
+        model_defaults["use_self_verify"],
+    )
     use_tools = model.get("use_tools", model_defaults["use_tools"])
     tool_timeout = model.get("tool_timeout", model_defaults["tool_timeout"])
     fallback = output.get("fallback_answer", output_defaults["fallback_answer"])
@@ -298,6 +309,8 @@ def load_config(path: Path) -> dict[str, Any]:
         use_cot_passage = model_defaults["use_cot_passage"]
     if not isinstance(cot_passage_max_chars, int) or cot_passage_max_chars < 1:
         cot_passage_max_chars = model_defaults["cot_passage_max_chars"]
+    if not isinstance(use_self_verify, bool):
+        use_self_verify = model_defaults["use_self_verify"]
     if not isinstance(use_tools, bool):
         use_tools = model_defaults["use_tools"]
     if not isinstance(tool_timeout, (int, float)) or tool_timeout <= 0:
@@ -358,6 +371,7 @@ def load_config(path: Path) -> dict[str, Any]:
             "cot_max_tokens": cot_max_tokens,
             "use_cot_passage": use_cot_passage,
             "cot_passage_max_chars": cot_passage_max_chars,
+            "use_self_verify": use_self_verify,
             "use_tools": use_tools,
             "tool_timeout": float(tool_timeout),
         },
@@ -419,6 +433,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.cot_passage_max_chars is None
             else args.cot_passage_max_chars
         )
+        use_self_verify = (
+            args.self_verify
+            if args.self_verify is not None
+            else config["model"]["use_self_verify"]
+        )
         use_tools = config["model"]["use_tools"] if args.tools is None else args.tools
         tool_timeout = args.tool_timeout
         n_gpu_layers = resolve_gpu_layers(args.n_gpu_layers)
@@ -457,6 +476,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.self_consistency is not None
             else config["self_consistency"]["enabled"]
         )
+        if self_consistency_enabled and use_self_verify:
+            raise ValueError("--self-verify cannot be combined with --self-consistency")
         input_path = discover_input(args.data_dir)
         if args.verbose:
             print(f"Input: {input_path}")
@@ -470,6 +491,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"cot_max_tokens: {cot_max_tokens}")
             print(f"use_cot_passage: {use_cot_passage}")
             print(f"cot_passage_max_chars: {cot_passage_max_chars}")
+            print(f"use_self_verify: {use_self_verify}")
             print(f"use_tools: {use_tools}")
             print(f"tool_timeout: {tool_timeout}")
             print(f"RAG requested: {rag_enabled}")
@@ -633,6 +655,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     use_pot_ranking=use_pot_ranking,
                     use_cot_passage=use_cot_passage,
                     cot_passage_max_chars=cot_passage_max_chars,
+                    use_self_verify=use_self_verify,
                 )
             )
         output_path = args.output_dir / "pred.csv"

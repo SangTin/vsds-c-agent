@@ -1,0 +1,115 @@
+# syntax=docker/dockerfile:1
+#
+# v10 submission image (leaderboard 83.37, +1.08pp over v4 82.29).
+# Builds on Dockerfile.v6 (tools + legal-RAG) by adding the polysci index and
+# the --cot flag. CoT (4-step Vietnamese reasoning, 350-token budget) is the
+# single technique that produced measurable gain; self-consistency is NOT
+# enabled because it regressed -0.86pp on its own (v9 = 81.43).
+#
+# Inference cost ≈ 2x baseline (1 reasoning pass + 1 grammar pass per question).
+# RAG path stays safe-by-construction: if BGE-m3/FAISS fail to load the pipeline
+# falls back to direct CoT answers rather than crashing the batch.
+#
+# Build prerequisites (run on a machine WITH internet + GPU + the assets):
+#   1. models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf
+#   2. data_kb/legal/{index.faiss,metadata.jsonl}
+#      (python scripts/fetch_uts_vlc.py && bash scripts/build_legal_index.sh)
+#   3. data_kb/polysci/{index.faiss,metadata.jsonl}
+#      (python scripts/build_targeted_corpus.py --raw data_kb/polysci/raw \
+#         --out data_kb/polysci/chunks.jsonl && \
+#       bash scripts/build_polysci_index.sh)
+# BGE-m3 weights are baked at build time; runtime is fully offline.
+
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        g++ \
+        gcc \
+        git \
+        ninja-build \
+        python3.11 \
+        python3.11-dev \
+        python3.11-distutils \
+        python3.11-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.11 -m venv /opt/venv
+
+ENV PATH="/opt/venv/bin:${PATH}" \
+    CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=all-major" \
+    FORCE_CMAKE=1
+
+RUN python -m pip install --upgrade pip setuptools wheel scikit-build-core ninja \
+    && python -m pip install --no-cache-dir sympy PyYAML \
+    && python -m pip install --no-cache-dir --no-binary=llama-cpp-python llama-cpp-python
+
+# RAG deps. torch is CPU-only on purpose: legal+polysci embedding runs on CPU,
+# so we avoid bundling the ~2.5GB CUDA torch wheel.
+RUN python -m pip install --no-cache-dir \
+        --extra-index-url https://download.pytorch.org/whl/cpu \
+        torch \
+    && python -m pip install --no-cache-dir \
+        "FlagEmbedding==1.2.10" \
+        "transformers==4.46.3" \
+        "tokenizers>=0.20,<0.21" \
+        "accelerate==1.1.1" \
+        "huggingface-hub<1.0" \
+        "faiss-cpu>=1.8"
+
+ENV HF_HOME=/opt/hf
+RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('BAAI/bge-m3')"
+
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgomp1 \
+        python3.11 \
+    && apt-get purge -y --auto-remove software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:${PATH}" \
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/opt/hf \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/hf /opt/hf
+COPY entrypoint.py config.yaml ./
+COPY src ./src
+COPY models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf /app/models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf
+COPY data_kb/legal/index.faiss data_kb/legal/metadata.jsonl /app/data_kb/legal/
+COPY data_kb/polysci/index.faiss data_kb/polysci/metadata.jsonl /app/data_kb/polysci/
+
+ENTRYPOINT ["python3", "entrypoint.py"]
+CMD ["--data-dir", "/data", "--output-dir", "/output", \
+     "--model-path", "/app/models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf", \
+     "--tools", \
+     "--cot", \
+     "--legal-rag", "--legal-device", "cpu", \
+     "--legal-index", "/app/data_kb/legal/index.faiss", \
+     "--legal-metadata", "/app/data_kb/legal/metadata.jsonl", \
+     "--polysci-rag", "--polysci-device", "cpu", \
+     "--polysci-index", "/app/data_kb/polysci/index.faiss", \
+     "--polysci-metadata", "/app/data_kb/polysci/metadata.jsonl"]

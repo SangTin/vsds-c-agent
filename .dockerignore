@@ -9,12 +9,16 @@ __pycache__/
 *.pyo
 *.log
 
-# Exclude the local knowledge base EXCEPT the baked legal index (needed by Dockerfile.v6).
+# Exclude the local knowledge base EXCEPT the baked indexes (needed by Dockerfile.v6 / Dockerfile.v10).
 data_kb/*
 !data_kb/legal/
+!data_kb/polysci/
 data_kb/legal/*
 !data_kb/legal/index.faiss
 !data_kb/legal/metadata.jsonl
+data_kb/polysci/*
+!data_kb/polysci/index.faiss
+!data_kb/polysci/metadata.jsonl
 docs/
 output/
 results/

@@ -160,6 +160,8 @@ def run_eval(
     cot: bool = False,
     pot_ranking: bool = False,
     cot_max_tokens: int | None = None,
+    cot_passage: bool = False,
+    cot_passage_max_chars: int | None = None,
     model_file: str | None = None,
 ) -> str:
     """Run the full 463-question public test; return pred.csv content."""
@@ -203,6 +205,10 @@ def run_eval(
         cmd += ["--cot"]
     if pot_ranking:
         cmd += ["--pot-ranking"]
+    if cot_passage:
+        cmd += ["--cot-passage"]
+    if cot_passage_max_chars is not None:
+        cmd += ["--cot-passage-max-chars", str(cot_passage_max_chars)]
     if cot_max_tokens is not None:
         cmd += ["--cot-max-tokens", str(cot_max_tokens)]
     if legal_rag:
@@ -280,6 +286,28 @@ def main_cot_long(rebuild_index: bool = False):
         cot_max_tokens=600,
     )
     out = Path("../output/pred-v13-cot-long.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
+def main_cot_passage(rebuild_index: bool = False):
+    """v15: v13 stack + CoT enabled for passage questions (<=3500 chars)."""
+    from pathlib import Path
+
+    assets = ensure_assets.remote(rebuild_index=rebuild_index)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=True,
+        polysci_rag=True,
+        self_consistency=False,
+        cot=True,
+        cot_max_tokens=600,
+        cot_passage=True,
+    )
+    out = Path("../output/pred-v15-cot-passage.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(pred, encoding="utf-8")
     rows = pred.strip().count("\n")

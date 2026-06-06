@@ -12,6 +12,9 @@ from src.router import is_law_question, is_math_question, is_polysci_question
 from src.schema import Prediction, Question
 
 
+_PASSAGE_MARKER = "\u0110o\u1ea1n th\u00f4ng tin:"
+
+
 def _select_mcq_method(
     llm: LLMAnswerer,
     self_consistency: bool,
@@ -26,19 +29,60 @@ def _select_mcq_method(
     return llm.answer_mcq
 
 
+def _select_non_cot_mcq_method(
+    llm: LLMAnswerer,
+    self_consistency: bool,
+) -> Callable[..., str]:
+    if self_consistency:
+        return llm.answer_mcq_self_consistent
+    return llm.answer_mcq
+
+
+def _select_mcq_method_for_question(
+    llm: LLMAnswerer,
+    self_consistency: bool,
+    q: Question,
+    use_cot_passage: bool,
+    cot_passage_max_chars: int,
+) -> Callable[..., str]:
+    use_cot = getattr(llm, "use_cot", False) is True
+    if _PASSAGE_MARKER not in q.question or not use_cot:
+        return _select_mcq_method(llm, self_consistency)
+
+    if use_cot_passage and len(q.question) <= cot_passage_max_chars:
+        return _select_mcq_method(llm, self_consistency)
+
+    if use_cot_passage:
+        print(
+            f"Warning: skipping CoT for passage question {q.qid!r}; "
+            f"question length {len(q.question)} exceeds "
+            f"cot_passage_max_chars={cot_passage_max_chars}",
+            file=sys.stderr,
+        )
+    return _select_non_cot_mcq_method(llm, self_consistency)
+
+
 def _direct_answer(
     q: Question,
     fallback_letter: str,
     llm: LLMAnswerer | None,
     retrieved: list[dict[str, Any]] | None = None,
     self_consistency: bool = False,
+    use_cot_passage: bool = False,
+    cot_passage_max_chars: int = 3500,
 ) -> Prediction:
     if llm is None:
         return Prediction(q.qid, fallback_letter)
 
     try:
         if self_consistency or getattr(llm, "use_cot", False) is True:
-            answer = _select_mcq_method(llm, self_consistency)(
+            answer = _select_mcq_method_for_question(
+                llm,
+                self_consistency,
+                q,
+                use_cot_passage,
+                cot_passage_max_chars,
+            )(
                 q.question,
                 q.choices,
                 context=None,
@@ -101,6 +145,8 @@ def answer_question(
     polysci_min_score: float = 0.0,
     self_consistency: bool = False,
     use_pot_ranking: bool = False,
+    use_cot_passage: bool = False,
+    cot_passage_max_chars: int = 3500,
 ) -> Prediction:
     """Answer one question with the LLM, falling back without breaking the batch."""
     fallback_letter = validate_letter(fallback, len(q.choices))
@@ -156,7 +202,13 @@ def answer_question(
             )
             if legal_chunks and top_score >= legal_min_score:
                 context = _legal_context(legal_chunks)
-                answer = _select_mcq_method(llm, self_consistency)(
+                answer = _select_mcq_method_for_question(
+                    llm,
+                    self_consistency,
+                    q,
+                    use_cot_passage,
+                    cot_passage_max_chars,
+                )(
                     q.question,
                     q.choices,
                     context=context,
@@ -174,6 +226,8 @@ def answer_question(
             fallback_letter,
             llm,
             self_consistency=self_consistency,
+            use_cot_passage=use_cot_passage,
+            cot_passage_max_chars=cot_passage_max_chars,
         )
 
     if llm is not None and polysci_retriever is not None and is_polysci_question(
@@ -189,7 +243,13 @@ def answer_question(
             )
             if polysci_chunks and top_score >= polysci_min_score:
                 context = _polysci_context(polysci_chunks)
-                answer = _select_mcq_method(llm, self_consistency)(
+                answer = _select_mcq_method_for_question(
+                    llm,
+                    self_consistency,
+                    q,
+                    use_cot_passage,
+                    cot_passage_max_chars,
+                )(
                     q.question,
                     q.choices,
                     context=context,
@@ -207,10 +267,12 @@ def answer_question(
             fallback_letter,
             llm,
             self_consistency=self_consistency,
+            use_cot_passage=use_cot_passage,
+            cot_passage_max_chars=cot_passage_max_chars,
         )
 
     retrieved: list[dict[str, Any]] | None = None
-    should_retrieve = retriever is not None and "Đoạn thông tin:" not in q.question
+    should_retrieve = retriever is not None and _PASSAGE_MARKER not in q.question
     if should_retrieve:
         try:
             retrieved = retriever.retrieve(q.question)
@@ -227,4 +289,6 @@ def answer_question(
         llm,
         retrieved=retrieved,
         self_consistency=self_consistency,
+        use_cot_passage=use_cot_passage,
+        cot_passage_max_chars=cot_passage_max_chars,
     )

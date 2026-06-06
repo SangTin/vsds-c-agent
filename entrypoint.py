@@ -28,6 +28,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "use_cot": False,
         "use_pot_ranking": False,
         "cot_max_tokens": 200,
+        "use_cot_passage": False,
+        "cot_passage_max_chars": 3500,
         "use_tools": False,
         "tool_timeout": 5.0,
     },
@@ -95,6 +97,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--pot-ranking", action="store_true", default=None)
     parser.add_argument("--no-pot-ranking", action="store_false", dest="pot_ranking")
     parser.add_argument("--cot-max-tokens", type=int, default=None)
+    parser.add_argument("--cot-passage", action="store_true", default=None)
+    parser.add_argument("--no-cot-passage", action="store_false", dest="cot_passage")
+    parser.add_argument("--cot-passage-max-chars", type=int, default=None)
     parser.add_argument("--tools", action="store_true", default=None)
     parser.add_argument("--no-tools", action="store_false", dest="tools")
     parser.add_argument(
@@ -216,6 +221,14 @@ def load_config(path: Path) -> dict[str, Any]:
         model_defaults["use_pot_ranking"],
     )
     cot_max_tokens = model.get("cot_max_tokens", model_defaults["cot_max_tokens"])
+    use_cot_passage = model.get(
+        "use_cot_passage",
+        model_defaults["use_cot_passage"],
+    )
+    cot_passage_max_chars = model.get(
+        "cot_passage_max_chars",
+        model_defaults["cot_passage_max_chars"],
+    )
     use_tools = model.get("use_tools", model_defaults["use_tools"])
     tool_timeout = model.get("tool_timeout", model_defaults["tool_timeout"])
     fallback = output.get("fallback_answer", output_defaults["fallback_answer"])
@@ -281,6 +294,10 @@ def load_config(path: Path) -> dict[str, Any]:
         use_pot_ranking = model_defaults["use_pot_ranking"]
     if not isinstance(cot_max_tokens, int):
         cot_max_tokens = model_defaults["cot_max_tokens"]
+    if not isinstance(use_cot_passage, bool):
+        use_cot_passage = model_defaults["use_cot_passage"]
+    if not isinstance(cot_passage_max_chars, int) or cot_passage_max_chars < 1:
+        cot_passage_max_chars = model_defaults["cot_passage_max_chars"]
     if not isinstance(use_tools, bool):
         use_tools = model_defaults["use_tools"]
     if not isinstance(tool_timeout, (int, float)) or tool_timeout <= 0:
@@ -339,6 +356,8 @@ def load_config(path: Path) -> dict[str, Any]:
             "use_cot": use_cot,
             "use_pot_ranking": use_pot_ranking,
             "cot_max_tokens": cot_max_tokens,
+            "use_cot_passage": use_cot_passage,
+            "cot_passage_max_chars": cot_passage_max_chars,
             "use_tools": use_tools,
             "tool_timeout": float(tool_timeout),
         },
@@ -390,6 +409,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.cot_max_tokens is None
             else args.cot_max_tokens
         )
+        use_cot_passage = (
+            config["model"]["use_cot_passage"]
+            if args.cot_passage is None
+            else args.cot_passage
+        )
+        cot_passage_max_chars = (
+            config["model"]["cot_passage_max_chars"]
+            if args.cot_passage_max_chars is None
+            else args.cot_passage_max_chars
+        )
         use_tools = config["model"]["use_tools"] if args.tools is None else args.tools
         tool_timeout = args.tool_timeout
         n_gpu_layers = resolve_gpu_layers(args.n_gpu_layers)
@@ -439,6 +468,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"use_cot: {use_cot}")
             print(f"use_pot_ranking: {use_pot_ranking}")
             print(f"cot_max_tokens: {cot_max_tokens}")
+            print(f"use_cot_passage: {use_cot_passage}")
+            print(f"cot_passage_max_chars: {cot_passage_max_chars}")
             print(f"use_tools: {use_tools}")
             print(f"tool_timeout: {tool_timeout}")
             print(f"RAG requested: {rag_enabled}")
@@ -600,6 +631,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     polysci_min_score=polysci_min_score,
                     self_consistency=self_consistency_enabled,
                     use_pot_ranking=use_pot_ranking,
+                    use_cot_passage=use_cot_passage,
+                    cot_passage_max_chars=cot_passage_max_chars,
                 )
             )
         output_path = args.output_dir / "pred.csv"

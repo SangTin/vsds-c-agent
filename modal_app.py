@@ -157,6 +157,7 @@ def run_eval(
     polysci_rag: bool = True,
     self_consistency: bool = True,
     cot: bool = False,
+    cot_max_tokens: int | None = None,
 ) -> str:
     """Run the full 463-question public test; return pred.csv content."""
     import os
@@ -196,6 +197,8 @@ def run_eval(
         cmd += ["--self-consistency"]
     if cot:
         cmd += ["--cot"]
+    if cot_max_tokens is not None:
+        cmd += ["--cot-max-tokens", str(cot_max_tokens)]
     if legal_rag:
         cmd += [
             "--legal-rag", "--legal-device", "cuda",
@@ -250,6 +253,27 @@ def main_cot(rebuild_index: bool = False):
         legal_rag=True, polysci_rag=True, self_consistency=False, cot=True
     )
     out = Path("../output/pred-v10-cot.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
+def main_cot_long(rebuild_index: bool = False):
+    """v13: CoT with extended 600-token reasoning budget (v10 ran at 200)."""
+    from pathlib import Path
+
+    assets = ensure_assets.remote(rebuild_index=rebuild_index)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=True,
+        polysci_rag=True,
+        self_consistency=False,
+        cot=True,
+        cot_max_tokens=600,
+    )
+    out = Path("../output/pred-v13-cot-long.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(pred, encoding="utf-8")
     rows = pred.strip().count("\n")

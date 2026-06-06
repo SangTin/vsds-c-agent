@@ -67,7 +67,7 @@ CACHE = "/cache"
 
 
 @app.function(image=image, gpu=GPU, volumes={CACHE: cache}, timeout=3600)
-def ensure_assets(rebuild_index: bool = False) -> dict:
+def ensure_assets(rebuild_index: bool = False, model_file: str | None = None) -> dict:
     """Download the GGUF and build the legal FAISS index into the Volume (idempotent)."""
     import os
     import subprocess
@@ -82,11 +82,12 @@ def ensure_assets(rebuild_index: bool = False) -> dict:
     os.makedirs(legal_dir, exist_ok=True)
     os.makedirs(polysci_dir, exist_ok=True)
 
-    model_path = f"{model_dir}/{MODEL_FILE}"
+    resolved_model_file = model_file or MODEL_FILE
+    model_path = f"{model_dir}/{resolved_model_file}"
     if not os.path.exists(model_path):
         from huggingface_hub import hf_hub_download
 
-        hf_hub_download(MODEL_REPO, MODEL_FILE, local_dir=model_dir)
+        hf_hub_download(MODEL_REPO, resolved_model_file, local_dir=model_dir)
 
     index_path = f"{legal_dir}/index.faiss"
     if rebuild_index or not os.path.exists(index_path):
@@ -159,6 +160,7 @@ def run_eval(
     cot: bool = False,
     pot_ranking: bool = False,
     cot_max_tokens: int | None = None,
+    model_file: str | None = None,
 ) -> str:
     """Run the full 463-question public test; return pred.csv content."""
     import os
@@ -166,7 +168,8 @@ def run_eval(
     import sys
 
     os.chdir("/app")
-    model_path = f"{CACHE}/qwen3.5-9b/{MODEL_FILE}"
+    resolved_model_file = model_file or MODEL_FILE
+    model_path = f"{CACHE}/qwen3.5-9b/{resolved_model_file}"
 
     # Fail loud if anything that would silently route to stub: model file missing,
     # llama_cpp not importable, or CUDA offload unavailable on this GPU. A silent
@@ -277,6 +280,29 @@ def main_cot_long(rebuild_index: bool = False):
         cot_max_tokens=600,
     )
     out = Path("../output/pred-v13-cot-long.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
+def main_cot_long_q5(rebuild_index: bool = False):
+    """v18: v13 stack (CoT 600t + RAG) on Q5_K_M quant (vs default Q4_K_M)."""
+    from pathlib import Path
+
+    q5_file = "Qwen3.5-9B-Q5_K_M.gguf"
+    assets = ensure_assets.remote(rebuild_index=rebuild_index, model_file=q5_file)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=True,
+        polysci_rag=True,
+        self_consistency=False,
+        cot=True,
+        cot_max_tokens=600,
+        model_file=q5_file,
+    )
+    out = Path("../output/pred-v18-cot-long-q5.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(pred, encoding="utf-8")
     rows = pred.strip().count("\n")

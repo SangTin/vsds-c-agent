@@ -1,12 +1,19 @@
 # syntax=docker/dockerfile:1
 #
-# v10 submission image (leaderboard 83.37, +1.08pp over v4 82.29).
-# Builds on Dockerfile.v6 (tools + legal-RAG) by adding the polysci index and
-# the --cot flag. CoT (4-step Vietnamese reasoning, 350-token budget) is the
-# single technique that produced measurable gain; self-consistency is NOT
-# enabled because it regressed -0.86pp on its own (v9 = 81.43).
+# v13 submission image (leaderboard 83.80, +1.51pp over v4 82.29).
+# Builds on Dockerfile.v6 (tools + legal-RAG) by adding the polysci index,
+# --cot, and an explicit 600-token reasoning budget (v10 used the config
+# default 200 and scored 83.37; v13's larger budget gives Qwen room to
+# finish the 4-step structured reasoning on STEM-heavy questions and
+# scored +0.43pp on the leaderboard). Self-consistency is NOT enabled
+# because it regressed -0.86pp on its own (v9 = 81.43) and -0.43pp when
+# stacked on top of CoT (v11 = 82.75).
 #
-# Inference cost ≈ 2x baseline (1 reasoning pass + 1 grammar pass per question).
+# PoT answer-ranking (v16) was also tried and regressed (v16 = 82.94):
+# Qwen3.5-9B-Q4 isn't reliable enough to write multi-step ranking code,
+# so the default solve_with_tools PoT is the right tool here.
+#
+# Inference cost ≈ 2.5x baseline (longer CoT reasoning pass + grammar pass).
 # RAG path stays safe-by-construction: if BGE-m3/FAISS fail to load the pipeline
 # falls back to direct CoT answers rather than crashing the batch.
 #
@@ -106,7 +113,7 @@ ENTRYPOINT ["python3", "entrypoint.py"]
 CMD ["--data-dir", "/data", "--output-dir", "/output", \
      "--model-path", "/app/models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf", \
      "--tools", \
-     "--cot", \
+     "--cot", "--cot-max-tokens", "600", \
      "--legal-rag", "--legal-device", "cpu", \
      "--legal-index", "/app/data_kb/legal/index.faiss", \
      "--legal-metadata", "/app/data_kb/legal/metadata.jsonl", \

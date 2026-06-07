@@ -240,6 +240,23 @@ def run_eval(
             f"eval collapsed to single letter {distinct} — LLM almost certainly fell to stub; "
             f"check container logs above for 'LLM disabled, falling back to stub: ...'"
         )
+    # Persist server-side too so the local entrypoint isn't the only sink. Lets the
+    # client `modal run --detach` then close the terminal; fetch later with
+    # `modal volume get vsds-cache outputs/<name>.csv` once the function finishes.
+    pred_dir = f"{CACHE}/outputs"
+    os.makedirs(pred_dir, exist_ok=True)
+    # Use a config-hash filename so concurrent detached runs don't overwrite each other.
+    tag = (
+        f"sc{int(self_consistency)}-cot{int(cot)}-cmt{cot_max_tokens or 0}"
+        f"-pot{int(pot_ranking)}-cp{int(cot_passage)}-sv{int(self_verify)}"
+        f"-ao{int(alignment_override)}-lr{int(legal_rag)}-pr{int(polysci_rag)}"
+        f"-{resolved_model_file.replace('.gguf','')}"
+    )
+    out_path = f"{pred_dir}/pred-{tag}.csv"
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(text)
+    cache.commit()
+    print(f"server-side pred saved: {out_path}")
     return text
 
 

@@ -296,6 +296,69 @@ def main_cot_long(rebuild_index: bool = False):
 
 
 @app.local_entrypoint()
+def main_cot_legal_only(rebuild_index: bool = False):
+    """v20: v13 stack minus polysci-RAG (test polysci RAG contribution)."""
+    from pathlib import Path
+
+    assets = ensure_assets.remote(rebuild_index=rebuild_index)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=True,
+        polysci_rag=False,
+        self_consistency=False,
+        cot=True,
+        cot_max_tokens=600,
+    )
+    out = Path("../output/pred-v20-cot-legal-only.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
+def main_cot_no_rag(rebuild_index: bool = False):
+    """v21: v13 stack minus BOTH RAGs (CoT-only with tools)."""
+    from pathlib import Path
+
+    assets = ensure_assets.remote(rebuild_index=rebuild_index)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=False,
+        polysci_rag=False,
+        self_consistency=False,
+        cot=True,
+        cot_max_tokens=600,
+    )
+    out = Path("../output/pred-v21-cot-no-rag.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
+def main_cot_xlong(rebuild_index: bool = False):
+    """v22: v13 stack + cot_max_tokens 1000 (extrapolate budget direction)."""
+    from pathlib import Path
+
+    assets = ensure_assets.remote(rebuild_index=rebuild_index)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=True,
+        polysci_rag=True,
+        self_consistency=False,
+        cot=True,
+        cot_max_tokens=1000,
+    )
+    out = Path("../output/pred-v22-cot-xlong.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
 def main_self_verify(rebuild_index: bool = False):
     """v17: v13 stack + self-verification 2-pass."""
     from pathlib import Path

@@ -163,6 +163,7 @@ def run_eval(
     cot_passage: bool = False,
     cot_passage_max_chars: int | None = None,
     self_verify: bool = False,
+    alignment_override: bool = False,
     model_file: str | None = None,
 ) -> str:
     """Run the full 463-question public test; return pred.csv content."""
@@ -210,6 +211,8 @@ def run_eval(
         cmd += ["--cot-passage"]
     if self_verify:
         cmd += ["--self-verify"]
+    if alignment_override:
+        cmd += ["--alignment-override"]
     if cot_passage_max_chars is not None:
         cmd += ["--cot-passage-max-chars", str(cot_passage_max_chars)]
     if cot_max_tokens is not None:
@@ -289,6 +292,28 @@ def main_cot_long(rebuild_index: bool = False):
         cot_max_tokens=600,
     )
     out = Path("../output/pred-v13-cot-long.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
+def main_alignment(rebuild_index: bool = False):
+    """v24: v13 stack + alignment-bait shortcut (productionize v23 leaderboard 84.67)."""
+    from pathlib import Path
+
+    assets = ensure_assets.remote(rebuild_index=rebuild_index)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=True,
+        polysci_rag=True,
+        self_consistency=False,
+        cot=True,
+        cot_max_tokens=600,
+        alignment_override=True,
+    )
+    out = Path("../output/pred-v24-alignment.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(pred, encoding="utf-8")
     rows = pred.strip().count("\n")

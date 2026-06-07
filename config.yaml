@@ -10,6 +10,7 @@ model:
   use_cot_passage: false
   cot_passage_max_chars: 3500
   use_self_verify: false
+  use_alignment_override: false
   use_tools: false
   tool_timeout: 5.0
 

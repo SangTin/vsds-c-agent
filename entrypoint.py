@@ -31,6 +31,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "use_cot_passage": False,
         "cot_passage_max_chars": 3500,
         "use_self_verify": False,
+        "use_alignment_override": False,
         "use_tools": False,
         "tool_timeout": 5.0,
     },
@@ -106,6 +107,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--no-self-verify",
         action="store_false",
         dest="self_verify",
+    )
+    parser.add_argument("--alignment-override", action="store_true", default=None)
+    parser.add_argument(
+        "--no-alignment-override",
+        action="store_false",
+        dest="alignment_override",
     )
     parser.add_argument("--tools", action="store_true", default=None)
     parser.add_argument("--no-tools", action="store_false", dest="tools")
@@ -240,6 +247,10 @@ def load_config(path: Path) -> dict[str, Any]:
         "use_self_verify",
         model_defaults["use_self_verify"],
     )
+    use_alignment_override = model.get(
+        "use_alignment_override",
+        model_defaults["use_alignment_override"],
+    )
     use_tools = model.get("use_tools", model_defaults["use_tools"])
     tool_timeout = model.get("tool_timeout", model_defaults["tool_timeout"])
     fallback = output.get("fallback_answer", output_defaults["fallback_answer"])
@@ -311,6 +322,8 @@ def load_config(path: Path) -> dict[str, Any]:
         cot_passage_max_chars = model_defaults["cot_passage_max_chars"]
     if not isinstance(use_self_verify, bool):
         use_self_verify = model_defaults["use_self_verify"]
+    if not isinstance(use_alignment_override, bool):
+        use_alignment_override = model_defaults["use_alignment_override"]
     if not isinstance(use_tools, bool):
         use_tools = model_defaults["use_tools"]
     if not isinstance(tool_timeout, (int, float)) or tool_timeout <= 0:
@@ -372,6 +385,7 @@ def load_config(path: Path) -> dict[str, Any]:
             "use_cot_passage": use_cot_passage,
             "cot_passage_max_chars": cot_passage_max_chars,
             "use_self_verify": use_self_verify,
+            "use_alignment_override": use_alignment_override,
             "use_tools": use_tools,
             "tool_timeout": float(tool_timeout),
         },
@@ -438,6 +452,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.self_verify is not None
             else config["model"]["use_self_verify"]
         )
+        use_alignment_override = (
+            args.alignment_override
+            if args.alignment_override is not None
+            else config["model"]["use_alignment_override"]
+        )
         use_tools = config["model"]["use_tools"] if args.tools is None else args.tools
         tool_timeout = args.tool_timeout
         n_gpu_layers = resolve_gpu_layers(args.n_gpu_layers)
@@ -492,6 +511,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"use_cot_passage: {use_cot_passage}")
             print(f"cot_passage_max_chars: {cot_passage_max_chars}")
             print(f"use_self_verify: {use_self_verify}")
+            print(f"use_alignment_override: {use_alignment_override}")
             print(f"use_tools: {use_tools}")
             print(f"tool_timeout: {tool_timeout}")
             print(f"RAG requested: {rag_enabled}")
@@ -656,6 +676,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     use_cot_passage=use_cot_passage,
                     cot_passage_max_chars=cot_passage_max_chars,
                     use_self_verify=use_self_verify,
+                    use_alignment_override=use_alignment_override,
                 )
             )
         output_path = args.output_dir / "pred.csv"

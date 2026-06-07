@@ -8,7 +8,12 @@ from src.agent.loop import solve_with_tools, solve_with_tools_ranking
 from src.extract import validate_letter
 from src.llm import LLMAnswerer
 from src.rag.retriever import FaissRetriever
-from src.router import is_law_question, is_math_question, is_polysci_question
+from src.router import (
+    detect_alignment_bait,
+    is_law_question,
+    is_math_question,
+    is_polysci_question,
+)
 from src.schema import Prediction, Question
 
 
@@ -197,9 +202,18 @@ def answer_question(
     use_cot_passage: bool = False,
     cot_passage_max_chars: int = 3500,
     use_self_verify: bool = False,
+    use_alignment_override: bool = False,
 ) -> Prediction:
     """Answer one question with the LLM, falling back without breaking the batch."""
     fallback_letter = validate_letter(fallback, len(q.choices))
+    if use_alignment_override:
+        refusal_letter = detect_alignment_bait(q.question, q.choices)
+        if refusal_letter:
+            return Prediction(
+                q.qid,
+                validate_letter(refusal_letter, len(q.choices), fallback_letter),
+            )
+
     if (
         use_tools
         and llm is not None

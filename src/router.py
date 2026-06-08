@@ -41,7 +41,9 @@ _LAW_KEYWORD_RE = re.compile(
 _PASSAGE_MARKERS = ("đoạn thông tin:", "doan thong tin:")
 _HOW_TO_RE = re.compile(
     r"làm thế nào|cách nào|phương thức|bằng cách nào|làm sao|"
-    r"cách hiệu quả|như thế nào",
+    r"cách hiệu quả|như thế nào|"
+    r"hành động nào|hành vi nào|"
+    r"thực hiện .{0,20}(?:nào|ra sao|thế nào)",
     flags=re.IGNORECASE,
 )
 _VIOLATION_RE = re.compile(

@@ -1,35 +1,30 @@
 # syntax=docker/dockerfile:1
 #
-# v13 submission image (leaderboard 83.80, +1.51pp over v4 82.29).
-# Builds on Dockerfile.v6 (tools + legal-RAG) by adding the polysci index,
-# --cot, and an explicit 600-token reasoning budget (v10 used the config
-# default 200 and scored 83.37; v13's larger budget gives Qwen room to
-# finish the 4-step structured reasoning on STEM-heavy questions and
-# scored +0.43pp on the leaderboard). Self-consistency is NOT enabled
-# because it regressed -0.86pp on its own (v9 = 81.43) and -0.43pp when
-# stacked on top of CoT (v11 = 82.75).
+# v25 submission image (public-test leaderboard 84.67 = +2.38pp vs v4 baseline).
 #
-# PoT answer-ranking (v16) was also tried and regressed (v16 = 82.94):
-# Qwen3.5-9B-Q4 isn't reliable enough to write multi-step ranking code,
-# so the default solve_with_tools PoT is the right tool here.
+# Config: Qwen3.5-9B Q4_K_M + Program-of-Thought (sympy) + targeted RAG
+# (legal UTS_VLC + 4 polysci textbooks via BGE-m3 + FAISS) + CoT 4-step
+# 600-token reasoning (applied on all questions incl. passage) +
+# alignment-bait shortcut (HOW-TO + violation + refusal choice → bypass
+# LLM with the refusal letter).
 #
-# Inference cost ≈ 2.5x baseline (longer CoT reasoning pass + grammar pass).
-# RAG path stays safe-by-construction: if BGE-m3/FAISS fail to load the pipeline
-# falls back to direct CoT answers rather than crashing the batch.
+# Failed variants are preserved on git branches/tags, not in this image:
+#   self-consistency (v9 -0.86pp), PoT-ranking (v16 -0.43pp),
+#   self-verification (v17 -1.29pp), Q5_K_M quant (v18 -1.08pp).
 #
-# Build prerequisites (run on a machine WITH internet + GPU + the assets):
-#   1. models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf
-#   2. data_kb/legal/{index.faiss,metadata.jsonl}
-#      (python scripts/fetch_uts_vlc.py && bash scripts/build_legal_index.sh)
-#   3. data_kb/polysci/{index.faiss,metadata.jsonl}
-#      (python scripts/build_targeted_corpus.py --raw data_kb/polysci/raw \
-#         --out data_kb/polysci/chunks.jsonl && \
-#       bash scripts/build_polysci_index.sh)
-# BGE-m3 weights are baked at build time; runtime is fully offline.
+# Build is fully cloud-friendly: pulls the GGUF from unsloth/Qwen3.5-9B-GGUF
+# and the two FAISS indexes from a HuggingFace dataset repo (default
+# suzueyume/vsds-c-rag-indexes, override with --build-arg INDEX_REPO=...).
+# No local model/index files required. Runtime is fully offline
+# (HF_HUB_OFFLINE=1, all assets baked into the image).
+
+ARG INDEX_REPO=suzueyume/vsds-c-rag-indexes
 
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04 AS builder
 
-ENV DEBIAN_FRONTEND=noninteractive
+ARG INDEX_REPO
+ENV INDEX_REPO=${INDEX_REPO} \
+    DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -73,8 +68,41 @@ RUN python -m pip install --no-cache-dir \
         "huggingface-hub<1.0" \
         "faiss-cpu>=1.8"
 
+# Bake BGE-m3 weights into a stable HF cache dir so runtime needs no network.
 ENV HF_HOME=/opt/hf
 RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('BAAI/bge-m3')"
+
+# Pull GGUF (public) and the two FAISS indexes (uploaded once via
+# scripts/upload_rag_indexes.py) into staging dirs so the runtime stage can
+# COPY them at fixed paths.
+RUN mkdir -p /opt/assets/models/qwen3.5-9b \
+             /opt/assets/data_kb/legal \
+             /opt/assets/data_kb/polysci
+RUN python <<'PY'
+import os
+from huggingface_hub import hf_hub_download
+
+INDEX_REPO = os.environ["INDEX_REPO"]
+
+hf_hub_download(
+    "unsloth/Qwen3.5-9B-GGUF",
+    "Qwen3.5-9B-Q4_K_M.gguf",
+    local_dir="/opt/assets/models/qwen3.5-9b",
+)
+
+for src in [
+    "legal/index.faiss",
+    "legal/metadata.jsonl",
+    "polysci/index.faiss",
+    "polysci/metadata.jsonl",
+]:
+    hf_hub_download(
+        INDEX_REPO,
+        src,
+        local_dir="/opt/assets/data_kb",
+        repo_type="dataset",
+    )
+PY
 
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 AS runtime
 
@@ -103,11 +131,10 @@ WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/hf /opt/hf
+COPY --from=builder /opt/assets/models /app/models
+COPY --from=builder /opt/assets/data_kb /app/data_kb
 COPY entrypoint.py config.yaml ./
 COPY src ./src
-COPY models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf /app/models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf
-COPY data_kb/legal/index.faiss data_kb/legal/metadata.jsonl /app/data_kb/legal/
-COPY data_kb/polysci/index.faiss data_kb/polysci/metadata.jsonl /app/data_kb/polysci/
 
 ENTRYPOINT ["python3", "entrypoint.py"]
 CMD ["--data-dir", "/data", "--output-dir", "/output", \

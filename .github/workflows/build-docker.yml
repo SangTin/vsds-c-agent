@@ -1,0 +1,59 @@
+name: Build submission Docker image
+
+# Manual trigger only — the image is ~12-15 GB and the build takes 60-90
+# minutes (compiles llama-cpp-python with CUDA, pulls a 5.4 GB GGUF, bakes
+# BGE-m3 weights). Don't auto-run on every push.
+on:
+  workflow_dispatch:
+    inputs:
+      index_repo:
+        description: "HF dataset repo holding legal/ + polysci/ FAISS indexes"
+        required: true
+        default: "suzueyume/vsds-c-rag-indexes"
+
+jobs:
+  build:
+    # Use ubuntu-latest-l (larger runner) if available — the default runner's
+    # ~14 GB SSD is tight for a ~12 GB image. If the larger runner isn't
+    # provisioned, fall back to ubuntu-latest and rely on the disk-cleanup
+    # step to make room.
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Free up ~10-15 GB on the runner so the build context + intermediate
+      # layers + final image all fit. The defaults install Android SDKs,
+      # .NET, Haskell toolchain, etc. that we don't need.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg INDEX_REPO="${{ github.event.inputs.index_repo }}" \
+            -t vsds-bangc:latest \
+            -f Dockerfile \
+            .
+
+      - name: Show image size
+        run: docker image ls vsds-bangc:latest
+
+      - name: Save image as compressed tarball
+        run: |
+          docker save vsds-bangc:latest | gzip -1 > vsds-bangc-v25.tar.gz
+          ls -lh vsds-bangc-v25.tar.gz
+
+      - name: Upload as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsds-bangc-v25
+          path: vsds-bangc-v25.tar.gz
+          retention-days: 14
+          if-no-files-found: error

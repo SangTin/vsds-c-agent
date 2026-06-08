@@ -114,6 +114,7 @@ CMD ["--data-dir", "/data", "--output-dir", "/output", \
      "--model-path", "/app/models/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf", \
      "--tools", \
      "--cot", "--cot-max-tokens", "600", \
+     "--alignment-override", \
      "--legal-rag", "--legal-device", "cpu", \
      "--legal-index", "/app/data_kb/legal/index.faiss", \
      "--legal-metadata", "/app/data_kb/legal/metadata.jsonl", \

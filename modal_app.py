@@ -338,6 +338,30 @@ def main_alignment(rebuild_index: bool = False):
 
 
 @app.local_entrypoint()
+def main_v25(rebuild_index: bool = False):
+    """v25: v24 + cot-passage enabled (restore v13 behavior on passage)."""
+    from pathlib import Path
+
+    assets = ensure_assets.remote(rebuild_index=rebuild_index)
+    print("assets ready:", assets)
+    pred = run_eval.remote(
+        legal_rag=True,
+        polysci_rag=True,
+        self_consistency=False,
+        cot=True,
+        cot_max_tokens=600,
+        cot_passage=True,
+        cot_passage_max_chars=10000,
+        alignment_override=True,
+    )
+    out = Path("../output/pred-v25-cotpass-alignment.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(pred, encoding="utf-8")
+    rows = pred.strip().count("\n")
+    print(f"wrote {out} ({rows} data rows)")
+
+
+@app.local_entrypoint()
 def main_cot_legal_only(rebuild_index: bool = False):
     """v20: v13 stack minus polysci-RAG (test polysci RAG contribution)."""
     from pathlib import Path
